@@ -21,6 +21,7 @@ input string TradeComment     = "GridMatrix";  // Ghi chú lệnh
 
 input group "=== CẤU HÌNH LƯỚI (GRID) ==="
 input double StartLot         = 0.01;          // Khối lượng lệnh đầu tiên (lots)
+input int    InitialOffsetPips = 10;           // Khoảng cách lệnh đầu từ giá hiện tại (pips)
 input int    GridGapPips      = 50;            // Khoảng cách giữa các lệnh (pips)
 input int    MaxOrdersPerSide = 5;             // Số lệnh tối đa MỖI CHIỀU
 
@@ -438,14 +439,21 @@ void OnTick()
 void PlaceAllGridOrders()
 {
    Print(">>> Dat tat ca lenh Grid...");
+   Print(">>> Khoang cach dau: ", InitialOffsetPips, " pips, Khoang cach luoi: ", GridGapPips, " pips");
    
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    
    // Dat lenh phia DUOI gia hien tai (BUY LIMIT va SELL STOP)
+   // Lenh 1: cach gia hien tai InitialOffsetPips
+   // Lenh 2+: cach lenh truoc GridGapPips
    for(int i = 1; i <= MaxOrdersPerSide; i++)
    {
-      double orderPrice = currentAsk - GridGapPips * g_pipValue * i;
+      double orderPrice;
+      if(i == 1)
+         orderPrice = currentAsk - InitialOffsetPips * g_pipValue;
+      else
+         orderPrice = currentAsk - InitialOffsetPips * g_pipValue - GridGapPips * g_pipValue * (i - 1);
       
       // Dat BUY LIMIT neu bat
       if(UseBuyLimit)
@@ -463,9 +471,15 @@ void PlaceAllGridOrders()
    }
    
    // Dat lenh phia TREN gia hien tai (SELL LIMIT va BUY STOP)
+   // Lenh 1: cach gia hien tai InitialOffsetPips
+   // Lenh 2+: cach lenh truoc GridGapPips
    for(int i = 1; i <= MaxOrdersPerSide; i++)
    {
-      double orderPrice = currentBid + GridGapPips * g_pipValue * i;
+      double orderPrice;
+      if(i == 1)
+         orderPrice = currentBid + InitialOffsetPips * g_pipValue;
+      else
+         orderPrice = currentBid + InitialOffsetPips * g_pipValue + GridGapPips * g_pipValue * (i - 1);
       
       // Dat SELL LIMIT neu bat
       if(UseSellLimit)
