@@ -90,9 +90,16 @@ bool           g_isFirstRun = true;
 int            g_tpCount = 0;
 int            g_slCount = 0;
 double         g_maxDrawdown = 0;
+double         g_maxProfit = 0;
 double         g_totalProfitAccum = 0;
 bool           g_isStopped = false;
 bool           g_isPaused = false;
+
+// Dem so lenh TP rieng cho tung loai
+int            g_buyLimitTPCount = 0;
+int            g_sellLimitTPCount = 0;
+int            g_buyStopTPCount = 0;
+int            g_sellStopTPCount = 0;
 
 //+------------------------------------------------------------------+
 //| Ham khoi tao EA                                                  |
@@ -219,14 +226,18 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
             Sleep(500);
          }
          
-         // Buoc 3: Reset tat ca bien
+         // Buoc 3: Reset tat ca bien (KHONG reset g_maxDrawdown va g_maxProfit)
          g_tpCount = 0;
          g_slCount = 0;
-         g_maxDrawdown = 0;
          g_totalProfitAccum = 0;
          g_isStopped = false;
          g_isPaused = true;
          g_isFirstRun = true;
+         // Reset bien dem lenh TP
+         g_buyLimitTPCount = 0;
+         g_sellLimitTPCount = 0;
+         g_buyStopTPCount = 0;
+         g_sellStopTPCount = 0;
          
          // Buoc 4: Cap nhat panel
          if(ShowPanel)
@@ -312,9 +323,11 @@ void OnTick()
    int totalPending = buyPending + sellPending;
    int totalOrders = totalPositions + totalPending;
    
-   // Chi cap nhat maxDrawdown khi EA DANG CHAY (khong pause/stop)
+   // Chi cap nhat maxDrawdown va maxProfit khi EA DANG CHAY (khong pause/stop)
    if(totalProfit < g_maxDrawdown)
       g_maxDrawdown = totalProfit;
+   if(totalProfit > g_maxProfit)
+      g_maxProfit = totalProfit;
    
    if(ShowPanel)
       UpdatePanel(totalProfit, buyPositions, sellPositions, buyPending, sellPending);
@@ -353,6 +366,11 @@ void OnTick()
       {
          Print(">>> TU DONG RESET EA - Bat dau vong moi...");
          Print(">>> Max Drawdown hien tai: ", DoubleToString(g_maxDrawdown, 2), " USD");
+         // Reset bien dem lenh TP
+         g_buyLimitTPCount = 0;
+         g_sellLimitTPCount = 0;
+         g_buyStopTPCount = 0;
+         g_sellStopTPCount = 0;
          Sleep(1000);
          g_isFirstRun = true;
       }
@@ -374,6 +392,11 @@ void OnTick()
       {
          Print(">>> TU DONG RESET EA - Bat dau vong moi...");
          Print(">>> Max Drawdown hien tai: ", DoubleToString(g_maxDrawdown, 2), " USD");
+         // Reset bien dem lenh TP
+         g_buyLimitTPCount = 0;
+         g_sellLimitTPCount = 0;
+         g_buyStopTPCount = 0;
+         g_sellStopTPCount = 0;
          Sleep(1000);
          g_isFirstRun = true;
       }
@@ -612,6 +635,53 @@ double GetHighestSellPrice()
       highestPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    
    return highestPrice;
+}
+
+//+------------------------------------------------------------------+
+//| Dem so lenh cho theo tung loai                                   |
+//+------------------------------------------------------------------+
+void CountPendingByType(int &buyLimitPending, int &sellLimitPending, int &buyStopPending, int &sellStopPending)
+{
+   buyLimitPending = 0;
+   sellLimitPending = 0;
+   buyStopPending = 0;
+   sellStopPending = 0;
+   
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            ENUM_ORDER_TYPE orderType = orderInfo.OrderType();
+            if(orderType == ORDER_TYPE_BUY_LIMIT) buyLimitPending++;
+            else if(orderType == ORDER_TYPE_SELL_LIMIT) sellLimitPending++;
+            else if(orderType == ORDER_TYPE_BUY_STOP) buyStopPending++;
+            else if(orderType == ORDER_TYPE_SELL_STOP) sellStopPending++;
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Dem so vi the dang mo theo tung loai                             |
+//+------------------------------------------------------------------+
+void CountPositionsByType(int &buyPositions, int &sellPositions)
+{
+   buyPositions = 0;
+   sellPositions = 0;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         {
+            if(positionInfo.PositionType() == POSITION_TYPE_BUY) buyPositions++;
+            else if(positionInfo.PositionType() == POSITION_TYPE_SELL) sellPositions++;
+         }
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -1173,28 +1243,40 @@ void CreatePanel()
    CreateLabel("GM_Panel_Symbol", "Cặp tiền: " + _Symbol, x, y, PanelColor, PanelFontSize);
    y += lineHeight;
    
-   string orderTypes = "";
-   if(UseBuyLimit) orderTypes += "BL ";
-   if(UseSellLimit) orderTypes += "SL ";
-   if(UseBuyStop) orderTypes += "BS ";
-   if(UseSellStop) orderTypes += "SS";
-   if(orderTypes == "") orderTypes = "KHÔNG CÓ";
-   CreateLabel("GM_Panel_LotMode", "Loại lệnh: " + orderTypes, x, y, PanelColor, PanelFontSize);
-   y += lineHeight;
-   
    CreateLabel("GM_Panel_Profit", "Lợi nhuận: 0.00 USD", x, y, PanelColor, PanelFontSize);
    y += lineHeight;
    
-   CreateLabel("GM_Panel_BuyPos", "MUA: 0 vị thế, 0 chờ", x, y, clrBlue, PanelFontSize);
+   // Chi tiet tung loai lenh
+   CreateLabel("GM_Panel_BuyLimit", "Buy Limit: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrBlue, PanelFontSize);
    y += lineHeight;
    
-   CreateLabel("GM_Panel_SellPos", "BÁN: 0 vị thế, 0 chờ", x, y, clrRed, PanelFontSize);
+   CreateLabel("GM_Panel_SellLimit", "Sell Limit: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrRed, PanelFontSize);
+   y += lineHeight;
+   
+   CreateLabel("GM_Panel_BuyStop", "Buy Stop: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrDodgerBlue, PanelFontSize);
+   y += lineHeight;
+   
+   CreateLabel("GM_Panel_SellStop", "Sell Stop: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrOrangeRed, PanelFontSize);
+   y += lineHeight;
+   
+   // Vi the dang mo
+   CreateLabel("GM_Panel_OpenBuy", "Đang mở BUY: 0", x, y, clrBlue, PanelFontSize);
+   y += lineHeight;
+   
+   CreateLabel("GM_Panel_OpenSell", "Đang mở SELL: 0", x, y, clrRed, PanelFontSize);
+   y += lineHeight;
+   
+   // Tong lenh dat TP
+   CreateLabel("GM_Panel_TPOrders", "Lệnh đạt TP: 0", x, y, clrGreen, PanelFontSize);
    y += lineHeight;
    
    CreateLabel("GM_Panel_TP", "Chốt lời: " + DoubleToString(TakeProfitMoney, 2) + " USD", x, y, clrGreen, PanelFontSize);
    y += lineHeight;
    
    CreateLabel("GM_Panel_SL", "Cắt lỗ: -" + DoubleToString(StopLossMoney, 2) + " USD", x, y, clrRed, PanelFontSize);
+   y += lineHeight;
+   
+   CreateLabel("GM_Panel_MaxProfit", "Lãi lớn nhất: 0.00 USD", x, y, clrGreen, PanelFontSize);
    y += lineHeight;
    
    CreateLabel("GM_Panel_MaxDD", "Lỗ lớn nhất: 0.00 USD", x, y, clrOrangeRed, PanelFontSize);
@@ -1276,9 +1358,30 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
    ObjectSetString(0, "GM_Panel_Profit", OBJPROP_TEXT, "Lợi nhuận: " + DoubleToString(profit, 2) + " USD");
    ObjectSetInteger(0, "GM_Panel_Profit", OBJPROP_COLOR, profitColor);
    
-   ObjectSetString(0, "GM_Panel_BuyPos", OBJPROP_TEXT, "MUA: " + IntegerToString(buyPos) + " vị thế, " + IntegerToString(buyPending) + " chờ");
-   ObjectSetString(0, "GM_Panel_SellPos", OBJPROP_TEXT, "BÁN: " + IntegerToString(sellPos) + " vị thế, " + IntegerToString(sellPending) + " chờ");
+   // Dem lenh cho theo tung loai
+   int buyLimitPending, sellLimitPending, buyStopPending, sellStopPending;
+   CountPendingByType(buyLimitPending, sellLimitPending, buyStopPending, sellStopPending);
    
+   // Hien thi tung loai lenh (so lenh cho / max)
+   string blText = UseBuyLimit ? "Buy Limit: " + IntegerToString(buyLimitPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Buy Limit: TẮT";
+   string slText = UseSellLimit ? "Sell Limit: " + IntegerToString(sellLimitPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Sell Limit: TẮT";
+   string bsText = UseBuyStop ? "Buy Stop: " + IntegerToString(buyStopPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Buy Stop: TẮT";
+   string ssText = UseSellStop ? "Sell Stop: " + IntegerToString(sellStopPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Sell Stop: TẮT";
+   
+   ObjectSetString(0, "GM_Panel_BuyLimit", OBJPROP_TEXT, blText);
+   ObjectSetString(0, "GM_Panel_SellLimit", OBJPROP_TEXT, slText);
+   ObjectSetString(0, "GM_Panel_BuyStop", OBJPROP_TEXT, bsText);
+   ObjectSetString(0, "GM_Panel_SellStop", OBJPROP_TEXT, ssText);
+   
+   // Vi the dang mo
+   ObjectSetString(0, "GM_Panel_OpenBuy", OBJPROP_TEXT, "Đang mở BUY: " + IntegerToString(buyPos));
+   ObjectSetString(0, "GM_Panel_OpenSell", OBJPROP_TEXT, "Đang mở SELL: " + IntegerToString(sellPos));
+   
+   // Tong lenh dat TP
+   int totalTPOrders = g_buyLimitTPCount + g_sellLimitTPCount + g_buyStopTPCount + g_sellStopTPCount;
+   ObjectSetString(0, "GM_Panel_TPOrders", OBJPROP_TEXT, "Lệnh đạt TP: " + IntegerToString(totalTPOrders));
+   
+   ObjectSetString(0, "GM_Panel_MaxProfit", OBJPROP_TEXT, "Lãi lớn nhất: " + DoubleToString(g_maxProfit, 2) + " USD");
    ObjectSetString(0, "GM_Panel_MaxDD", OBJPROP_TEXT, "Lỗ lớn nhất: " + DoubleToString(g_maxDrawdown, 2) + " USD");
    
    ObjectSetString(0, "GM_Panel_TotalProfit", OBJPROP_TEXT, "Tổng lãi: " + DoubleToString(g_totalProfitAccum, 2) + " / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD");
