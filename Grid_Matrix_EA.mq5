@@ -33,6 +33,7 @@ input bool   BuyLimitLotAdd        = false;    // Gấp thếp CỘNG cho Buy Li
 input double BuyLimitAddition      = 0.01;     // Bước cộng Buy Limit
 input bool   UseBuyLimitTP         = false;    // Bật TP riêng cho Buy Limit
 input int    BuyLimitTPPips        = 50;       // TP Buy Limit (pips)
+input bool   AutoRefillBuyLimit    = false;    // Tự động bổ sung Buy Limit khi đạt TP
 
 input group "=== SELL LIMIT ==="
 input bool   UseSellLimit          = true;     // Bật lệnh Sell Limit
@@ -42,6 +43,7 @@ input bool   SellLimitLotAdd       = false;    // Gấp thếp CỘNG cho Sell L
 input double SellLimitAddition     = 0.01;     // Bước cộng Sell Limit
 input bool   UseSellLimitTP        = false;    // Bật TP riêng cho Sell Limit
 input int    SellLimitTPPips       = 50;       // TP Sell Limit (pips)
+input bool   AutoRefillSellLimit   = false;    // Tự động bổ sung Sell Limit khi đạt TP
 
 input group "=== BUY STOP ==="
 input bool   UseBuyStop            = false;    // Bật lệnh Buy Stop
@@ -51,6 +53,7 @@ input bool   BuyStopLotAdd         = false;    // Gấp thếp CỘNG cho Buy St
 input double BuyStopAddition       = 0.01;     // Bước cộng Buy Stop
 input bool   UseBuyStopTP          = false;    // Bật TP riêng cho Buy Stop
 input int    BuyStopTPPips         = 50;       // TP Buy Stop (pips)
+input bool   AutoRefillBuyStop     = false;    // Tự động bổ sung Buy Stop khi đạt TP
 
 input group "=== SELL STOP ==="
 input bool   UseSellStop           = false;    // Bật lệnh Sell Stop
@@ -60,6 +63,7 @@ input bool   SellStopLotAdd        = false;    // Gấp thếp CỘNG cho Sell S
 input double SellStopAddition      = 0.01;     // Bước cộng Sell Stop
 input bool   UseSellStopTP         = false;    // Bật TP riêng cho Sell Stop
 input int    SellStopTPPips        = 50;       // TP Sell Stop (pips)
+input bool   AutoRefillSellStop    = false;    // Tự động bổ sung Sell Stop khi đạt TP
 
 input group "=== CHỐT LỜI / CẮT LỖ THEO TIỀN ==="
 input double TakeProfitMoney  = 100.0;         // Chốt lời khi lãi đạt (USD)
@@ -91,7 +95,6 @@ bool           g_isFirstRun = true;
 int            g_tpCount = 0;
 int            g_slCount = 0;
 double         g_maxDrawdown = 0;
-double         g_maxProfit = 0;
 double         g_totalProfitAccum = 0;
 bool           g_isStopped = false;
 bool           g_isPaused = false;
@@ -101,6 +104,23 @@ int            g_buyLimitTPCount = 0;
 int            g_sellLimitTPCount = 0;
 int            g_buyStopTPCount = 0;
 int            g_sellStopTPCount = 0;
+
+// Luu gia LENH (open price) de bo sung lenh Stop (AutoRefill)
+double         g_lastBuyStopOrderPrice = 0;      // Gia mo lenh Buy Stop vua dat TP
+double         g_lastSellStopOrderPrice = 0;     // Gia mo lenh Sell Stop vua dat TP
+bool           g_pendingBuyStopRefill = false;   // Co can bo sung Buy Stop khong (AutoRefill)
+bool           g_pendingSellStopRefill = false;  // Co can bo sung Sell Stop khong (AutoRefill)
+
+// Mang luu cac level gia CO DINH cua luoi (de tu dong bo sung lenh)
+double         g_gridBuyLimitLevels[100];     // Cac level gia Buy Limit
+double         g_gridSellLimitLevels[100];    // Cac level gia Sell Limit
+double         g_gridBuyStopLevels[100];      // Cac level gia Buy Stop
+double         g_gridSellStopLevels[100];     // Cac level gia Sell Stop
+int            g_gridBuyLimitCount = 0;       // So luong level Buy Limit
+int            g_gridSellLimitCount = 0;      // So luong level Sell Limit
+int            g_gridBuyStopCount = 0;        // So luong level Buy Stop
+int            g_gridSellStopCount = 0;       // So luong level Sell Stop
+bool           g_gridInitialized = false;     // Da khoi tao grid chua
 
 //+------------------------------------------------------------------+
 //| Ham khoi tao EA                                                  |
@@ -151,6 +171,49 @@ void OnDeinit(const int reason)
    Print("=== GRID MATRIX EA da dung ===");
    Print("Tong so lan TP: ", g_tpCount);
    Print("Tong so lan SL: ", g_slCount);
+}
+
+//+------------------------------------------------------------------+
+//| Xu ly su kien giao dich (dem so lan TP cho thong ke)             |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+{
+   // Chi xu ly khi vi the dong (TRADE_TRANSACTION_DEAL_ADD)
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   
+   ulong dealTicket = trans.deal;
+   if(dealTicket == 0) return;
+   
+   if(!HistoryDealSelect(dealTicket)) return;
+   
+   long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+   string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+   long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   long dealReason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
+   double dealProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   string dealComment = HistoryDealGetString(dealTicket, DEAL_COMMENT);
+   
+   // Chi xu ly lenh cua EA nay, tren symbol nay, khi DONG vi the
+   if(dealMagic != MagicNumber) return;
+   if(dealSymbol != _Symbol) return;
+   if(dealEntry != DEAL_ENTRY_OUT) return;
+   
+   // Dem so lan TP theo loai lenh (cho thong ke)
+   if(dealReason == DEAL_REASON_TP && dealProfit > 0)
+   {
+      if(StringFind(dealComment, "_BS#") >= 0)
+         g_buyStopTPCount++;
+      else if(StringFind(dealComment, "_SS#") >= 0)
+         g_sellStopTPCount++;
+      else if(StringFind(dealComment, "_BL#") >= 0)
+         g_buyLimitTPCount++;
+      else if(StringFind(dealComment, "_SL#") >= 0)
+         g_sellLimitTPCount++;
+      
+      Print(">>> Lenh dat TP! Comment: ", dealComment, " Profit: ", DoubleToString(dealProfit, 2));
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -227,7 +290,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
             Sleep(500);
          }
          
-         // Buoc 3: Reset tat ca bien (KHONG reset g_maxDrawdown va g_maxProfit)
+         // Buoc 3: Reset tat ca bien (KHONG reset g_maxDrawdown)
          g_tpCount = 0;
          g_slCount = 0;
          g_totalProfitAccum = 0;
@@ -239,6 +302,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          g_sellLimitTPCount = 0;
          g_buyStopTPCount = 0;
          g_sellStopTPCount = 0;
+         // Reset bien bo sung lenh Stop
+         g_pendingBuyStopRefill = false;
+         g_pendingSellStopRefill = false;
+         g_lastBuyStopOrderPrice = 0;
+         g_lastSellStopOrderPrice = 0;
+         // Reset grid levels
+         g_gridInitialized = false;
          
          // Buoc 4: Cap nhat panel
          if(ShowPanel)
@@ -324,16 +394,14 @@ void OnTick()
    int totalPending = buyPending + sellPending;
    int totalOrders = totalPositions + totalPending;
    
-   // Chi cap nhat maxDrawdown va maxProfit khi EA DANG CHAY (khong pause/stop)
+   // Chi cap nhat maxDrawdown khi EA DANG CHAY (khong pause/stop)
    if(totalProfit < g_maxDrawdown)
       g_maxDrawdown = totalProfit;
-   if(totalProfit > g_maxProfit)
-      g_maxProfit = totalProfit;
    
    if(ShowPanel)
       UpdatePanel(totalProfit, buyPositions, sellPositions, buyPending, sellPending);
    
-   // Kiem tra TP tong - chi dung khi KHONG con vi the dang mo
+   // Kiem tra TP tong - DUNG EA khi dat du so tien
    if(TotalTakeProfitMoney > 0 && g_totalProfitAccum >= TotalTakeProfitMoney && totalPositions == 0)
    {
       Print(">>> DA DAT TP TONG! Tong lai: ", DoubleToString(g_totalProfitAccum, 2), " USD");
@@ -354,7 +422,7 @@ void OnTick()
       
       Print(">>> Tong lai tich luy: ", DoubleToString(g_totalProfitAccum, 2), " USD");
       
-      // Kiem tra TP tong sau khi chot loi
+      // Kiem tra TP tong sau khi chot loi - DUNG EA neu dat du
       if(TotalTakeProfitMoney > 0 && g_totalProfitAccum >= TotalTakeProfitMoney)
       {
          Print(">>> DA DAT TP TONG! Tong lai: ", DoubleToString(g_totalProfitAccum, 2), " USD");
@@ -372,6 +440,13 @@ void OnTick()
          g_sellLimitTPCount = 0;
          g_buyStopTPCount = 0;
          g_sellStopTPCount = 0;
+         // Reset bien bo sung lenh Stop
+         g_pendingBuyStopRefill = false;
+         g_pendingSellStopRefill = false;
+         g_lastBuyStopOrderPrice = 0;
+         g_lastSellStopOrderPrice = 0;
+         // Reset grid levels
+         g_gridInitialized = false;
          Sleep(1000);
          g_isFirstRun = true;
       }
@@ -398,6 +473,13 @@ void OnTick()
          g_sellLimitTPCount = 0;
          g_buyStopTPCount = 0;
          g_sellStopTPCount = 0;
+         // Reset bien bo sung lenh Stop
+         g_pendingBuyStopRefill = false;
+         g_pendingSellStopRefill = false;
+         g_lastBuyStopOrderPrice = 0;
+         g_lastSellStopOrderPrice = 0;
+         // Reset grid levels
+         g_gridInitialized = false;
          Sleep(1000);
          g_isFirstRun = true;
       }
@@ -412,25 +494,9 @@ void OnTick()
       return;
    }
    
-   // Quan ly luoi BUY - Bo sung lenh neu can
-   if(UseBuyLimit || UseSellStop)
-   {
-      int totalBuy = buyPositions + buyPending;
-      if(totalBuy < MaxOrdersPerSide)
-      {
-         ManageGridBuy(totalBuy);
-      }
-   }
-   
-   // Quan ly luoi SELL - Bo sung lenh neu can
-   if(UseSellLimit || UseBuyStop)
-   {
-      int totalSell = sellPositions + sellPending;
-      if(totalSell < MaxOrdersPerSide)
-      {
-         ManageGridSell(totalSell);
-      }
-   }
+   // TU DONG BO SUNG LENH TAI CAC LEVEL DA LUU (Auto Refill)
+   // Moi tick kiem tra tat ca level va dat lai neu chua co lenh
+   EnsureGridOrders();
 }
 
 //+------------------------------------------------------------------+
@@ -443,135 +509,330 @@ void PlaceAllGridOrders()
    
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double midPrice = (currentAsk + currentBid) / 2.0;
+   
+   Print(">>> Gia tham chieu: ", DoubleToString(midPrice, g_digits));
+   
+   // Reset cac mang level
+   g_gridBuyLimitCount = 0;
+   g_gridSellLimitCount = 0;
+   g_gridBuyStopCount = 0;
+   g_gridSellStopCount = 0;
    
    // Dat lenh phia DUOI gia hien tai (BUY LIMIT va SELL STOP)
-   // Lenh 1: cach gia hien tai InitialOffsetPips
-   // Lenh 2+: cach lenh truoc GridGapPips
    for(int i = 1; i <= MaxOrdersPerSide; i++)
    {
       double orderPrice;
       if(i == 1)
-         orderPrice = currentAsk - InitialOffsetPips * g_pipValue;
+         orderPrice = midPrice - InitialOffsetPips * g_pipValue;
       else
-         orderPrice = currentAsk - InitialOffsetPips * g_pipValue - GridGapPips * g_pipValue * (i - 1);
+         orderPrice = midPrice - InitialOffsetPips * g_pipValue - GridGapPips * g_pipValue * (i - 1);
       
-      // Dat BUY LIMIT neu bat
+      orderPrice = NormalizeDouble(orderPrice, g_digits);
+      
+      // Luu level va dat BUY LIMIT neu bat
       if(UseBuyLimit)
       {
+         g_gridBuyLimitLevels[g_gridBuyLimitCount] = orderPrice;
+         g_gridBuyLimitCount++;
          double lot = CalculateBuyLimitLot(i);
          PlaceBuyLimit(orderPrice, lot, i);
       }
       
-      // Dat SELL STOP trung vi tri
+      // Luu level va dat SELL STOP trung vi tri
       if(UseSellStop)
       {
+         g_gridSellStopLevels[g_gridSellStopCount] = orderPrice;
+         g_gridSellStopCount++;
          double lot = CalculateSellStopLot(i);
          PlaceSellStop(orderPrice, lot, i);
       }
    }
    
    // Dat lenh phia TREN gia hien tai (SELL LIMIT va BUY STOP)
-   // Lenh 1: cach gia hien tai InitialOffsetPips
-   // Lenh 2+: cach lenh truoc GridGapPips
    for(int i = 1; i <= MaxOrdersPerSide; i++)
    {
       double orderPrice;
       if(i == 1)
-         orderPrice = currentBid + InitialOffsetPips * g_pipValue;
+         orderPrice = midPrice + InitialOffsetPips * g_pipValue;
       else
-         orderPrice = currentBid + InitialOffsetPips * g_pipValue + GridGapPips * g_pipValue * (i - 1);
+         orderPrice = midPrice + InitialOffsetPips * g_pipValue + GridGapPips * g_pipValue * (i - 1);
       
-      // Dat SELL LIMIT neu bat
+      orderPrice = NormalizeDouble(orderPrice, g_digits);
+      
+      // Luu level va dat SELL LIMIT neu bat
       if(UseSellLimit)
       {
+         g_gridSellLimitLevels[g_gridSellLimitCount] = orderPrice;
+         g_gridSellLimitCount++;
          double lot = CalculateSellLimitLot(i);
          PlaceSellLimit(orderPrice, lot, i);
       }
       
-      // Dat BUY STOP trung vi tri
+      // Luu level va dat BUY STOP trung vi tri
       if(UseBuyStop)
       {
+         g_gridBuyStopLevels[g_gridBuyStopCount] = orderPrice;
+         g_gridBuyStopCount++;
          double lot = CalculateBuyStopLot(i);
          PlaceBuyStop(orderPrice, lot, i);
       }
    }
    
+   g_gridInitialized = true;
+   Print(">>> Da luu ", g_gridBuyLimitCount, " level BL, ", g_gridSellLimitCount, " level SL, ", g_gridBuyStopCount, " level BS, ", g_gridSellStopCount, " level SS");
    Print(">>> Da dat xong tat ca lenh Grid!");
 }
 
 //+------------------------------------------------------------------+
-//| Quan ly luoi BUY - Bo sung lenh BUY LIMIT (va SELL STOP)         |
+//| Dam bao co lenh tai tat ca cac level (Auto Refill)               |
+//| Logic giong EAGridTrading: Moi tick kiem tra va dat lai lenh     |
 //+------------------------------------------------------------------+
-void ManageGridBuy(int currentBuyOrders)
+void EnsureGridOrders()
 {
-   if(currentBuyOrders >= MaxOrdersPerSide) return;
+   if(!g_gridInitialized) return;
    
-   double lowestPrice = GetLowestBuyPrice();
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double minDistance = GridGapPips * g_pipValue * 0.5; // Khoang cach toi thieu de dat lenh
    
-   int ordersToPlace = MaxOrdersPerSide - currentBuyOrders;
+   // Buy Limit: kiem tra va bo sung tai cac level DUOI gia hien tai
+   if(AutoRefillBuyLimit && UseBuyLimit)
+   {
+      for(int i = 0; i < g_gridBuyLimitCount; i++)
+      {
+         double level = g_gridBuyLimitLevels[i];
+         
+         // Bo qua neu level qua gan gia hien tai
+         if(MathAbs(level - currentAsk) < minDistance) continue;
+         
+         // Chi dat Buy Limit tai level DUOI gia Ask
+         if(level < currentAsk)
+         {
+            EnsureOrderAtLevel(ORDER_TYPE_BUY_LIMIT, level);
+         }
+      }
+   }
+   
+   // Sell Limit: kiem tra va bo sung tai cac level TREN gia hien tai
+   if(AutoRefillSellLimit && UseSellLimit)
+   {
+      for(int i = 0; i < g_gridSellLimitCount; i++)
+      {
+         double level = g_gridSellLimitLevels[i];
+         
+         // Bo qua neu level qua gan gia hien tai
+         if(MathAbs(level - currentBid) < minDistance) continue;
+         
+         // Chi dat Sell Limit tai level TREN gia Bid
+         if(level > currentBid)
+         {
+            EnsureOrderAtLevel(ORDER_TYPE_SELL_LIMIT, level);
+         }
+      }
+   }
+   
+   // Buy Stop: kiem tra va bo sung tai cac level TREN gia hien tai
+   // Dieu kien bo sung: gia hien tai < (level - GridGapPips)
+   if(AutoRefillBuyStop && UseBuyStop)
+   {
+      double gridDistance = GridGapPips * g_pipValue;
+      
+      for(int i = 0; i < g_gridBuyStopCount; i++)
+      {
+         double level = g_gridBuyStopLevels[i];
+         
+         // Chi bo sung khi gia < (level - GridGapPips)
+         // Tuc la gia phai thap hon level it nhat 1 khoang luoi
+         if(currentAsk < (level - gridDistance))
+         {
+            EnsureOrderAtLevel(ORDER_TYPE_BUY_STOP, level);
+         }
+      }
+   }
+   
+   // Sell Stop: kiem tra va bo sung tai cac level DUOI gia hien tai
+   // Dieu kien bo sung: gia hien tai > (level + GridGapPips)
+   if(AutoRefillSellStop && UseSellStop)
+   {
+      double gridDistance = GridGapPips * g_pipValue;
+      
+      for(int i = 0; i < g_gridSellStopCount; i++)
+      {
+         double level = g_gridSellStopLevels[i];
+         
+         // Chi bo sung khi gia > (level + GridGapPips)
+         // Tuc la gia phai cao hon level it nhat 1 khoang luoi
+         if(currentBid > (level + gridDistance))
+         {
+            EnsureOrderAtLevel(ORDER_TYPE_SELL_STOP, level);
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Dam bao co lenh tai level - tao neu chua co                      |
+//| Moi luoi chi co 1 lenh Buy va 1 lenh Sell                        |
+//+------------------------------------------------------------------+
+void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
+{
+   // Xac dinh day la lenh Buy hay Sell
+   bool isBuyOrder = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP);
+   
+   // Kiem tra da co lenh cung chieu tai level nay chua
+   // (1 luoi chi co 1 Buy va 1 Sell)
+   if(HasBuyOrSellOrderAtLevel(isBuyOrder, priceLevel))
+      return;
+   
+   // Chua co lenh, dat lenh moi
+   double lot = StartLot;
+   double price = NormalizeDouble(priceLevel, g_digits);
+   
+   if(orderType == ORDER_TYPE_BUY_LIMIT)
+   {
+      if(PlaceBuyLimit(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Buy Limit tai ", DoubleToString(price, g_digits));
+   }
+   else if(orderType == ORDER_TYPE_SELL_LIMIT)
+   {
+      if(PlaceSellLimit(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Sell Limit tai ", DoubleToString(price, g_digits));
+   }
+   else if(orderType == ORDER_TYPE_BUY_STOP)
+   {
+      if(PlaceBuyStop(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Buy Stop tai ", DoubleToString(price, g_digits));
+   }
+   else if(orderType == ORDER_TYPE_SELL_STOP)
+   {
+      if(PlaceSellStop(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Sell Stop tai ", DoubleToString(price, g_digits));
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Kiem tra da co lenh Buy hoac Sell tai level chua                 |
+//| isBuy = true: kiem tra Buy Limit + Buy Stop                      |
+//| isBuy = false: kiem tra Sell Limit + Sell Stop                   |
+//+------------------------------------------------------------------+
+bool HasBuyOrSellOrderAtLevel(bool isBuy, double level)
+{
+   double tolerance = g_pipValue * 2; // Sai so 2 pips
+   
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            ENUM_ORDER_TYPE ot = orderInfo.OrderType();
+            bool isOrderBuy = (ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP);
+            
+            // Chi kiem tra lenh cung chieu (Buy hoac Sell)
+            if(isOrderBuy == isBuy)
+            {
+               if(MathAbs(orderInfo.PriceOpen() - level) < tolerance)
+                  return true;
+            }
+         }
+      }
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Quan ly luoi BUY LIMIT - Bo sung lenh rieng                      |
+//+------------------------------------------------------------------+
+void ManageGridBuyLimit(int currentOrders)
+{
+   if(currentOrders >= MaxOrdersPerSide) return;
+   
+   double lowestPrice = GetLowestBuyLimitPrice();
+   
+   int ordersToPlace = MaxOrdersPerSide - currentOrders;
    double nextPrice = lowestPrice;
    
    for(int i = 0; i < ordersToPlace; i++)
    {
       nextPrice = nextPrice - GridGapPips * g_pipValue;
-      int orderNum = currentBuyOrders + i + 1;
-      
-      // Dat BUY LIMIT neu bat
-      if(UseBuyLimit)
-      {
-         double lot = CalculateBuyLimitLot(orderNum);
-         PlaceBuyLimit(nextPrice, lot, orderNum);
-      }
-      
-      // Dat SELL STOP trung vi tri
-      if(UseSellStop)
-      {
-         double lot = CalculateSellStopLot(orderNum);
-         PlaceSellStop(nextPrice, lot, orderNum);
-      }
+      int orderNum = currentOrders + i + 1;
+      double lot = CalculateBuyLimitLot(orderNum);
+      PlaceBuyLimit(nextPrice, lot, orderNum);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Quan ly luoi SELL - Bo sung lenh SELL LIMIT (va BUY STOP)        |
+//| Quan ly luoi SELL LIMIT - Bo sung lenh rieng                     |
 //+------------------------------------------------------------------+
-void ManageGridSell(int currentSellOrders)
+void ManageGridSellLimit(int currentOrders)
 {
-   if(currentSellOrders >= MaxOrdersPerSide) return;
+   if(currentOrders >= MaxOrdersPerSide) return;
    
-   double highestPrice = GetHighestSellPrice();
+   double highestPrice = GetHighestSellLimitPrice();
    
-   int ordersToPlace = MaxOrdersPerSide - currentSellOrders;
+   int ordersToPlace = MaxOrdersPerSide - currentOrders;
    double nextPrice = highestPrice;
    
    for(int i = 0; i < ordersToPlace; i++)
    {
       nextPrice = nextPrice + GridGapPips * g_pipValue;
-      int orderNum = currentSellOrders + i + 1;
-      
-      // Dat SELL LIMIT neu bat
-      if(UseSellLimit)
-      {
-         double lot = CalculateSellLimitLot(orderNum);
-         PlaceSellLimit(nextPrice, lot, orderNum);
-      }
-      
-      // Dat BUY STOP trung vi tri
-      if(UseBuyStop)
-      {
-         double lot = CalculateBuyStopLot(orderNum);
-         PlaceBuyStop(nextPrice, lot, orderNum);
-      }
+      int orderNum = currentOrders + i + 1;
+      double lot = CalculateSellLimitLot(orderNum);
+      PlaceSellLimit(nextPrice, lot, orderNum);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Lay gia thap nhat cua cac lenh BUY (vi the + lenh cho)           |
+//| Quan ly luoi BUY STOP - Bo sung lenh rieng                       |
 //+------------------------------------------------------------------+
-double GetLowestBuyPrice()
+void ManageGridBuyStop(int currentOrders)
+{
+   if(currentOrders >= MaxOrdersPerSide) return;
+   
+   double highestPrice = GetHighestBuyStopPrice();
+   
+   int ordersToPlace = MaxOrdersPerSide - currentOrders;
+   double nextPrice = highestPrice;
+   
+   for(int i = 0; i < ordersToPlace; i++)
+   {
+      nextPrice = nextPrice + GridGapPips * g_pipValue;
+      int orderNum = currentOrders + i + 1;
+      double lot = CalculateBuyStopLot(orderNum);
+      PlaceBuyStop(nextPrice, lot, orderNum);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Quan ly luoi SELL STOP - Bo sung lenh rieng                      |
+//+------------------------------------------------------------------+
+void ManageGridSellStop(int currentOrders)
+{
+   if(currentOrders >= MaxOrdersPerSide) return;
+   
+   double lowestPrice = GetLowestSellStopPrice();
+   
+   int ordersToPlace = MaxOrdersPerSide - currentOrders;
+   double nextPrice = lowestPrice;
+   
+   for(int i = 0; i < ordersToPlace; i++)
+   {
+      nextPrice = nextPrice - GridGapPips * g_pipValue;
+      int orderNum = currentOrders + i + 1;
+      double lot = CalculateSellStopLot(orderNum);
+      PlaceSellStop(nextPrice, lot, orderNum);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Lay gia thap nhat cua lenh BUY LIMIT (chi lenh cho)              |
+//+------------------------------------------------------------------+
+double GetLowestBuyLimitPrice()
 {
    double lowestPrice = DBL_MAX;
    
+   // Chi kiem tra lenh cho Buy Limit
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       if(orderInfo.SelectByIndex(i))
@@ -587,34 +848,24 @@ double GetLowestBuyPrice()
       }
    }
    
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(positionInfo.SelectByIndex(i))
-      {
-         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
-         {
-            if(positionInfo.PositionType() == POSITION_TYPE_BUY)
-            {
-               if(positionInfo.PriceOpen() < lowestPrice)
-                  lowestPrice = positionInfo.PriceOpen();
-            }
-         }
-      }
-   }
-   
+   // Neu khong co lenh cho nao, dung gia hien tai - InitialOffsetPips
    if(lowestPrice == DBL_MAX)
-      lowestPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   {
+      double midPrice = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) + SymbolInfoDouble(_Symbol, SYMBOL_BID)) / 2.0;
+      lowestPrice = midPrice - InitialOffsetPips * g_pipValue + GridGapPips * g_pipValue;
+   }
    
    return lowestPrice;
 }
 
 //+------------------------------------------------------------------+
-//| Lay gia cao nhat cua cac lenh SELL (vi the + lenh cho)           |
+//| Lay gia cao nhat cua lenh SELL LIMIT (chi lenh cho)              |
 //+------------------------------------------------------------------+
-double GetHighestSellPrice()
+double GetHighestSellLimitPrice()
 {
    double highestPrice = 0;
    
+   // Chi kiem tra lenh cho Sell Limit
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       if(orderInfo.SelectByIndex(i))
@@ -630,25 +881,80 @@ double GetHighestSellPrice()
       }
    }
    
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   // Neu khong co lenh cho nao, dung gia hien tai + InitialOffsetPips
+   if(highestPrice == 0)
    {
-      if(positionInfo.SelectByIndex(i))
+      double midPrice = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) + SymbolInfoDouble(_Symbol, SYMBOL_BID)) / 2.0;
+      highestPrice = midPrice + InitialOffsetPips * g_pipValue - GridGapPips * g_pipValue;
+   }
+   
+   return highestPrice;
+}
+
+//+------------------------------------------------------------------+
+//| Lay gia cao nhat cua lenh BUY STOP (chi lenh cho)                |
+//+------------------------------------------------------------------+
+double GetHighestBuyStopPrice()
+{
+   double highestPrice = 0;
+   
+   // Chi kiem tra lenh cho Buy Stop
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
       {
-         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
          {
-            if(positionInfo.PositionType() == POSITION_TYPE_SELL)
+            if(orderInfo.OrderType() == ORDER_TYPE_BUY_STOP)
             {
-               if(positionInfo.PriceOpen() > highestPrice)
-                  highestPrice = positionInfo.PriceOpen();
+               if(orderInfo.PriceOpen() > highestPrice)
+                  highestPrice = orderInfo.PriceOpen();
             }
          }
       }
    }
    
+   // Neu khong co lenh cho nao, dung gia hien tai + InitialOffsetPips
    if(highestPrice == 0)
-      highestPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   {
+      double midPrice = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) + SymbolInfoDouble(_Symbol, SYMBOL_BID)) / 2.0;
+      highestPrice = midPrice + InitialOffsetPips * g_pipValue - GridGapPips * g_pipValue;
+   }
    
    return highestPrice;
+}
+
+//+------------------------------------------------------------------+
+//| Lay gia thap nhat cua lenh SELL STOP (chi lenh cho)              |
+//+------------------------------------------------------------------+
+double GetLowestSellStopPrice()
+{
+   double lowestPrice = DBL_MAX;
+   
+   // Chi kiem tra lenh cho Sell Stop
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            if(orderInfo.OrderType() == ORDER_TYPE_SELL_STOP)
+            {
+               if(orderInfo.PriceOpen() < lowestPrice)
+                  lowestPrice = orderInfo.PriceOpen();
+            }
+         }
+      }
+   }
+   
+   // Neu khong co lenh cho nao, dung gia hien tai - InitialOffsetPips
+   if(lowestPrice == DBL_MAX)
+   {
+      double midPrice = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) + SymbolInfoDouble(_Symbol, SYMBOL_BID)) / 2.0;
+      lowestPrice = midPrice - InitialOffsetPips * g_pipValue + GridGapPips * g_pipValue;
+   }
+   
+   return lowestPrice;
 }
 
 //+------------------------------------------------------------------+
@@ -825,7 +1131,7 @@ bool PlaceBuyStop(double price, double lot, int orderNum)
       tp = NormalizeDouble(price + BuyStopTPPips * g_pipValue, g_digits);
    }
    
-   string comment = TradeComment + "_BS" + IntegerToString(orderNum);
+   string comment = TradeComment + "_BS#" + IntegerToString(orderNum);
    
    if(trade.BuyStop(lot, price, _Symbol, 0, tp, ORDER_TIME_GTC, 0, comment))
    {
@@ -864,7 +1170,7 @@ bool PlaceSellStop(double price, double lot, int orderNum)
       tp = NormalizeDouble(price - SellStopTPPips * g_pipValue, g_digits);
    }
    
-   string comment = TradeComment + "_SS" + IntegerToString(orderNum);
+   string comment = TradeComment + "_SS#" + IntegerToString(orderNum);
    
    if(trade.SellStop(lot, price, _Symbol, 0, tp, ORDER_TIME_GTC, 0, comment))
    {
@@ -903,7 +1209,7 @@ bool PlaceBuyLimit(double price, double lot, int orderNum)
       tp = NormalizeDouble(price + BuyLimitTPPips * g_pipValue, g_digits);
    }
    
-   string comment = TradeComment + "_B" + IntegerToString(orderNum);
+   string comment = TradeComment + "_BL#" + IntegerToString(orderNum);
    
    if(trade.BuyLimit(lot, price, _Symbol, 0, tp, ORDER_TIME_GTC, 0, comment))
    {
@@ -942,7 +1248,7 @@ bool PlaceSellLimit(double price, double lot, int orderNum)
       tp = NormalizeDouble(price - SellLimitTPPips * g_pipValue, g_digits);
    }
    
-   string comment = TradeComment + "_S" + IntegerToString(orderNum);
+   string comment = TradeComment + "_SL#" + IntegerToString(orderNum);
    
    if(trade.SellLimit(lot, price, _Symbol, 0, tp, ORDER_TIME_GTC, 0, comment))
    {
@@ -1280,23 +1586,16 @@ void CreatePanel()
    CreateLabel("GM_Panel_OpenSell", "Đang mở SELL: 0", x, y, clrRed, PanelFontSize);
    y += lineHeight;
    
-   // Tong lenh dat TP
-   CreateLabel("GM_Panel_TPOrders", "Lệnh đạt TP: 0", x, y, clrGreen, PanelFontSize);
+   CreateLabel("GM_Panel_TP", "Reset tại lãi: +" + DoubleToString(TakeProfitMoney, 2) + " USD", x, y, clrGreen, PanelFontSize);
    y += lineHeight;
    
-   CreateLabel("GM_Panel_TP", "Chốt lời: " + DoubleToString(TakeProfitMoney, 2) + " USD", x, y, clrGreen, PanelFontSize);
-   y += lineHeight;
-   
-   CreateLabel("GM_Panel_SL", "Cắt lỗ: -" + DoubleToString(StopLossMoney, 2) + " USD", x, y, clrRed, PanelFontSize);
-   y += lineHeight;
-   
-   CreateLabel("GM_Panel_MaxProfit", "Lãi lớn nhất: 0.00 USD", x, y, clrGreen, PanelFontSize);
+   CreateLabel("GM_Panel_SL", "Reset tại lỗ: -" + DoubleToString(StopLossMoney, 2) + " USD", x, y, clrRed, PanelFontSize);
    y += lineHeight;
    
    CreateLabel("GM_Panel_MaxDD", "Lỗ lớn nhất: 0.00 USD", x, y, clrOrangeRed, PanelFontSize);
    y += lineHeight;
    
-   CreateLabel("GM_Panel_TotalProfit", "Tổng lãi: 0.00 / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD", x, y, clrDarkGreen, PanelFontSize);
+   CreateLabel("GM_Panel_TotalProfit", "Tổng đã đóng: 0.00 / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD", x, y, clrDarkGreen, PanelFontSize);
    y += lineHeight;
    
    CreateLabel("GM_Panel_Status", "Trạng thái: ĐANG CHẠY", x, y, clrGreen, PanelFontSize);
@@ -1372,7 +1671,7 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
    ObjectSetString(0, "GM_Panel_Profit", OBJPROP_TEXT, "Lợi nhuận: " + DoubleToString(profit, 2) + " USD");
    ObjectSetInteger(0, "GM_Panel_Profit", OBJPROP_COLOR, profitColor);
    
-   // Dem lenh cho theo tung loai
+   // Dem lenh cho theo tung loai - CHI DEM LENH CHO
    int buyLimitPending, sellLimitPending, buyStopPending, sellStopPending;
    CountPendingByType(buyLimitPending, sellLimitPending, buyStopPending, sellStopPending);
    
@@ -1391,14 +1690,10 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
    ObjectSetString(0, "GM_Panel_OpenBuy", OBJPROP_TEXT, "Đang mở BUY: " + IntegerToString(buyPos));
    ObjectSetString(0, "GM_Panel_OpenSell", OBJPROP_TEXT, "Đang mở SELL: " + IntegerToString(sellPos));
    
-   // Tong lenh dat TP
-   int totalTPOrders = g_buyLimitTPCount + g_sellLimitTPCount + g_buyStopTPCount + g_sellStopTPCount;
-   ObjectSetString(0, "GM_Panel_TPOrders", OBJPROP_TEXT, "Lệnh đạt TP: " + IntegerToString(totalTPOrders));
-   
-   ObjectSetString(0, "GM_Panel_MaxProfit", OBJPROP_TEXT, "Lãi lớn nhất: " + DoubleToString(g_maxProfit, 2) + " USD");
    ObjectSetString(0, "GM_Panel_MaxDD", OBJPROP_TEXT, "Lỗ lớn nhất: " + DoubleToString(g_maxDrawdown, 2) + " USD");
    
-   ObjectSetString(0, "GM_Panel_TotalProfit", OBJPROP_TEXT, "Tổng lãi: " + DoubleToString(g_totalProfitAccum, 2) + " / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD");
+   // Hien thi: Tong lai da dong / So tien dung EA
+   ObjectSetString(0, "GM_Panel_TotalProfit", OBJPROP_TEXT, "Tổng đã đóng: " + DoubleToString(g_totalProfitAccum, 2) + " / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD");
    color totalColor = g_totalProfitAccum >= 0 ? clrDarkGreen : clrRed;
    ObjectSetInteger(0, "GM_Panel_TotalProfit", OBJPROP_COLOR, totalColor);
    
