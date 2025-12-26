@@ -592,6 +592,9 @@ void EnsureGridOrders()
 {
    if(!g_gridInitialized) return;
    
+   // BUOC 1: Xoa cac lenh trung lap truoc (dam bao moi luoi chi 1 Buy, 1 Sell)
+   CleanDuplicateOrdersAtLevels();
+   
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double minDistance = GridGapPips * g_pipValue * 0.5; // Khoang cach toi thieu de dat lenh
@@ -666,6 +669,112 @@ void EnsureGridOrders()
          if(currentBid > (level + gridDistance))
          {
             EnsureOrderAtLevel(ORDER_TYPE_SELL_STOP, level);
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Xoa lenh trung lap tai moi luoi - Dam bao chi 1 Buy va 1 Sell    |
+//+------------------------------------------------------------------+
+void CleanDuplicateOrdersAtLevels()
+{
+   double tolerance = g_pipValue * 2;
+   
+   // Kiem tra tat ca cac level Buy Limit
+   for(int i = 0; i < g_gridBuyLimitCount; i++)
+   {
+      CleanDuplicateBuyOrdersAtLevel(g_gridBuyLimitLevels[i], tolerance);
+   }
+   
+   // Kiem tra tat ca cac level Sell Limit
+   for(int i = 0; i < g_gridSellLimitCount; i++)
+   {
+      CleanDuplicateSellOrdersAtLevel(g_gridSellLimitLevels[i], tolerance);
+   }
+   
+   // Kiem tra tat ca cac level Buy Stop
+   for(int i = 0; i < g_gridBuyStopCount; i++)
+   {
+      CleanDuplicateBuyOrdersAtLevel(g_gridBuyStopLevels[i], tolerance);
+   }
+   
+   // Kiem tra tat ca cac level Sell Stop
+   for(int i = 0; i < g_gridSellStopCount; i++)
+   {
+      CleanDuplicateSellOrdersAtLevel(g_gridSellStopLevels[i], tolerance);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Xoa lenh Buy trung lap tai 1 level - Giu lai 1 lenh duy nhat     |
+//+------------------------------------------------------------------+
+void CleanDuplicateBuyOrdersAtLevel(double level, double tolerance)
+{
+   int buyOrderCount = 0;
+   ulong firstBuyTicket = 0;
+   
+   // Dem so lenh Buy tai level va tim lenh dau tien
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            ENUM_ORDER_TYPE ot = orderInfo.OrderType();
+            if(ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP)
+            {
+               if(MathAbs(orderInfo.PriceOpen() - level) < tolerance)
+               {
+                  buyOrderCount++;
+                  if(buyOrderCount == 1)
+                     firstBuyTicket = orderInfo.Ticket();
+                  else
+                  {
+                     // Xoa lenh thua (tu lenh thu 2 tro di)
+                     ulong ticketToDelete = orderInfo.Ticket();
+                     if(trade.OrderDelete(ticketToDelete))
+                        Print(">>> XOA LENH TRUNG: Buy tai ", DoubleToString(level, g_digits), " Ticket=", ticketToDelete);
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Xoa lenh Sell trung lap tai 1 level - Giu lai 1 lenh duy nhat    |
+//+------------------------------------------------------------------+
+void CleanDuplicateSellOrdersAtLevel(double level, double tolerance)
+{
+   int sellOrderCount = 0;
+   ulong firstSellTicket = 0;
+   
+   // Dem so lenh Sell tai level va tim lenh dau tien
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            ENUM_ORDER_TYPE ot = orderInfo.OrderType();
+            if(ot == ORDER_TYPE_SELL_LIMIT || ot == ORDER_TYPE_SELL_STOP)
+            {
+               if(MathAbs(orderInfo.PriceOpen() - level) < tolerance)
+               {
+                  sellOrderCount++;
+                  if(sellOrderCount == 1)
+                     firstSellTicket = orderInfo.Ticket();
+                  else
+                  {
+                     // Xoa lenh thua (tu lenh thu 2 tro di)
+                     ulong ticketToDelete = orderInfo.Ticket();
+                     if(trade.OrderDelete(ticketToDelete))
+                        Print(">>> XOA LENH TRUNG: Sell tai ", DoubleToString(level, g_digits), " Ticket=", ticketToDelete);
+                  }
+               }
+            }
          }
       }
    }
