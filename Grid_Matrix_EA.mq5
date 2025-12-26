@@ -507,11 +507,32 @@ void PlaceAllGridOrders()
    Print(">>> Dat tat ca lenh Grid...");
    Print(">>> Khoang cach dau: ", InitialOffsetPips, " pips, Khoang cach luoi: ", GridGapPips, " pips");
    
-   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   // Su dung MqlTick de lay gia chinh xac hon
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol, tick))
+   {
+      Print(">>> CANH BAO: Chua co du lieu gia, cho tick tiep theo...");
+      g_isFirstRun = true; // Thu lai o tick sau
+      return;
+   }
+   
+   double currentAsk = tick.ask;
+   double currentBid = tick.bid;
+   
+   // Kiem tra gia hop le
+   if(currentAsk <= 0 || currentBid <= 0 || currentAsk <= currentBid)
+   {
+      Print(">>> CANH BAO: Gia khong hop le (Ask=", DoubleToString(currentAsk, g_digits), 
+            ", Bid=", DoubleToString(currentBid, g_digits), "), cho tick tiep theo...");
+      g_isFirstRun = true; // Thu lai o tick sau
+      return;
+   }
+   
    double midPrice = (currentAsk + currentBid) / 2.0;
    
-   Print(">>> Gia tham chieu: ", DoubleToString(midPrice, g_digits));
+   Print(">>> Gia tham chieu: ", DoubleToString(midPrice, g_digits), 
+         " (Ask=", DoubleToString(currentAsk, g_digits), 
+         ", Bid=", DoubleToString(currentBid, g_digits), ")");
    
    // Reset cac mang level
    g_gridBuyLimitCount = 0;
