@@ -674,18 +674,22 @@ void EnsureGridOrders()
 //+------------------------------------------------------------------+
 //| Dam bao co lenh tai level - tao neu chua co                      |
 //| Moi luoi chi co 1 lenh Buy va 1 lenh Sell                        |
+//| Kiem tra ky: pending order + position dang mo                    |
 //+------------------------------------------------------------------+
 void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
 {
    // Xac dinh day la lenh Buy hay Sell
    bool isBuyOrder = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP);
    
-   // Kiem tra da co lenh cung chieu tai level nay chua
-   // (1 luoi chi co 1 Buy va 1 Sell)
+   // KIEM TRA 1: Da co lenh cho (pending) cung chieu tai level nay chua?
    if(HasBuyOrSellOrderAtLevel(isBuyOrder, priceLevel))
       return;
    
-   // Chua co lenh, dat lenh moi
+   // KIEM TRA 2: Da co position dang mo cung chieu tai level nay chua?
+   if(HasBuyOrSellPositionAtLevel(isBuyOrder, priceLevel))
+      return;
+   
+   // Da kiem tra ky - Chua co lenh va position, dat lenh moi
    double lot = StartLot;
    double price = NormalizeDouble(priceLevel, g_digits);
    
@@ -712,7 +716,7 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
 }
 
 //+------------------------------------------------------------------+
-//| Kiem tra da co lenh Buy hoac Sell tai level chua                 |
+//| Kiem tra da co lenh cho (pending) Buy hoac Sell tai level chua   |
 //| isBuy = true: kiem tra Buy Limit + Buy Stop                      |
 //| isBuy = false: kiem tra Sell Limit + Sell Stop                   |
 //+------------------------------------------------------------------+
@@ -733,6 +737,36 @@ bool HasBuyOrSellOrderAtLevel(bool isBuy, double level)
             if(isOrderBuy == isBuy)
             {
                if(MathAbs(orderInfo.PriceOpen() - level) < tolerance)
+                  return true;
+            }
+         }
+      }
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Kiem tra da co position dang mo Buy hoac Sell tai level chua     |
+//| isBuy = true: kiem tra position Buy                              |
+//| isBuy = false: kiem tra position Sell                            |
+//+------------------------------------------------------------------+
+bool HasBuyOrSellPositionAtLevel(bool isBuy, double level)
+{
+   double tolerance = g_pipValue * 2; // Sai so 2 pips
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         {
+            ENUM_POSITION_TYPE pt = positionInfo.PositionType();
+            bool isPosBuy = (pt == POSITION_TYPE_BUY);
+            
+            // Chi kiem tra position cung chieu (Buy hoac Sell)
+            if(isPosBuy == isBuy)
+            {
+               if(MathAbs(positionInfo.PriceOpen() - level) < tolerance)
                   return true;
             }
          }
