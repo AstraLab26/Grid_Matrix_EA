@@ -606,8 +606,68 @@ void PlaceAllGridOrders()
 }
 
 //+------------------------------------------------------------------+
+//| Dem tong so lenh (cho + mo) cua 1 loai lenh                      |
+//| orderType: BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP            |
+//| Tra ve: so lenh cho + so position tuong ung                       |
+//+------------------------------------------------------------------+
+int CountTotalOrdersOfType(ENUM_ORDER_TYPE orderType)
+{
+   int pendingCount = 0;
+   int positionCount = 0;
+   
+   // Xac dinh loai position tuong ung
+   bool isBuyType = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP);
+   ENUM_POSITION_TYPE posType = isBuyType ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+   
+   // Dem lenh cho cung loai
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            if(orderInfo.OrderType() == orderType)
+               pendingCount++;
+         }
+      }
+   }
+   
+   // Dem position tuong ung (Buy hoac Sell)
+   // Position Buy = tu Buy Limit hoac Buy Stop da khop
+   // Position Sell = tu Sell Limit hoac Sell Stop da khop
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         {
+            if(positionInfo.PositionType() == posType)
+               positionCount++;
+         }
+      }
+   }
+   
+   return pendingCount + positionCount;
+}
+
+//+------------------------------------------------------------------+
+//| Kiem tra con slot trong de dat lenh moi khong                    |
+//| Tong (lenh cho + position) phai < MaxOrdersPerSide               |
+//+------------------------------------------------------------------+
+bool CanPlaceMoreOrders(ENUM_ORDER_TYPE orderType)
+{
+   int totalOrders = CountTotalOrdersOfType(orderType);
+   
+   if(totalOrders >= MaxOrdersPerSide)
+      return false;
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
 //| Dam bao co lenh tai tat ca cac level (Auto Refill)               |
 //| Logic giong EAGridTrading: Moi tick kiem tra va dat lai lenh     |
+//| Chi bo sung khi tong lenh (cho + mo) < MaxOrdersPerSide          |
 //+------------------------------------------------------------------+
 void EnsureGridOrders()
 {
@@ -621,10 +681,13 @@ void EnsureGridOrders()
    double minDistance = GridGapPips * g_pipValue * 0.5; // Khoang cach toi thieu de dat lenh
    
    // Buy Limit: kiem tra va bo sung tai cac level DUOI gia hien tai
-   if(AutoRefillBuyLimit && UseBuyLimit)
+   if(AutoRefillBuyLimit && UseBuyLimit && CanPlaceMoreOrders(ORDER_TYPE_BUY_LIMIT))
    {
       for(int i = 0; i < g_gridBuyLimitCount; i++)
       {
+         // Kiem tra lai truoc moi lenh (vi co the da dat du trong vong lap)
+         if(!CanPlaceMoreOrders(ORDER_TYPE_BUY_LIMIT)) break;
+         
          double level = g_gridBuyLimitLevels[i];
          
          // Bo qua neu level qua gan gia hien tai
@@ -639,10 +702,13 @@ void EnsureGridOrders()
    }
    
    // Sell Limit: kiem tra va bo sung tai cac level TREN gia hien tai
-   if(AutoRefillSellLimit && UseSellLimit)
+   if(AutoRefillSellLimit && UseSellLimit && CanPlaceMoreOrders(ORDER_TYPE_SELL_LIMIT))
    {
       for(int i = 0; i < g_gridSellLimitCount; i++)
       {
+         // Kiem tra lai truoc moi lenh
+         if(!CanPlaceMoreOrders(ORDER_TYPE_SELL_LIMIT)) break;
+         
          double level = g_gridSellLimitLevels[i];
          
          // Bo qua neu level qua gan gia hien tai
@@ -658,12 +724,15 @@ void EnsureGridOrders()
    
    // Buy Stop: kiem tra va bo sung tai cac level TREN gia hien tai
    // Dieu kien bo sung: gia hien tai < (level - GridGapPips)
-   if(AutoRefillBuyStop && UseBuyStop)
+   if(AutoRefillBuyStop && UseBuyStop && CanPlaceMoreOrders(ORDER_TYPE_BUY_STOP))
    {
       double gridDistance = GridGapPips * g_pipValue;
       
       for(int i = 0; i < g_gridBuyStopCount; i++)
       {
+         // Kiem tra lai truoc moi lenh
+         if(!CanPlaceMoreOrders(ORDER_TYPE_BUY_STOP)) break;
+         
          double level = g_gridBuyStopLevels[i];
          
          // Chi bo sung khi gia < (level - GridGapPips)
@@ -677,12 +746,15 @@ void EnsureGridOrders()
    
    // Sell Stop: kiem tra va bo sung tai cac level DUOI gia hien tai
    // Dieu kien bo sung: gia hien tai > (level + GridGapPips)
-   if(AutoRefillSellStop && UseSellStop)
+   if(AutoRefillSellStop && UseSellStop && CanPlaceMoreOrders(ORDER_TYPE_SELL_STOP))
    {
       double gridDistance = GridGapPips * g_pipValue;
       
       for(int i = 0; i < g_gridSellStopCount; i++)
       {
+         // Kiem tra lai truoc moi lenh
+         if(!CanPlaceMoreOrders(ORDER_TYPE_SELL_STOP)) break;
+         
          double level = g_gridSellStopLevels[i];
          
          // Chi bo sung khi gia > (level + GridGapPips)
