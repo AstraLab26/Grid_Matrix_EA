@@ -180,6 +180,7 @@ void OnDeinit(const int reason)
 {
    ObjectsDeleteAll(0, "GM_Panel_");
    ObjectsDeleteAll(0, "GM_Btn_");
+   ObjectDelete(0, "GM_RefPriceLine");  // Xoa duong gia goc
    Print("=== GRID MATRIX EA da dung ===");
    Print("Tong so lan TP: ", g_tpCount);
    Print("Tong so lan SL: ", g_slCount);
@@ -678,9 +679,15 @@ void PlaceAllGridOrders()
    
    g_gridInitialized = true;
    g_gridReferencePrice = midPrice;  // Luu gia tham chieu
+   
+   // Ve duong gia goc luoi mau vang net dut
+   DrawReferencePriceLine(g_gridReferencePrice);
+   
    Print(">>> Da luu ", g_gridBuyLimitCount, " level BL, ", g_gridSellLimitCount, " level SL, ", g_gridBuyStopCount, " level BS, ", g_gridSellStopCount, " level SS");
    Print(">>> Da dat xong tat ca lenh Grid!");
    Print(">>> GIA GOC LUOI: ", DoubleToString(g_gridReferencePrice, g_digits));
+   Print(">>> TREN duong vang: Sell Limit + Buy Stop (hoac Sell Open + Buy Stop, Sell Limit + Buy Open)");
+   Print(">>> DUOI duong vang: Buy Limit + Sell Stop (hoac Buy Open + Sell Stop, Buy Limit + Sell Open)");
 }
 
 //+------------------------------------------------------------------+
@@ -961,6 +968,13 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
    // Xac dinh day la lenh Buy hay Sell
    bool isBuyOrder = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP);
    
+   // KIEM TRA 0: Kiem tra cau truc dung theo vi tri so voi duong vang
+   if(!IsValidOrderTypeForLevel(orderType, priceLevel))
+   {
+      Print(">>> CANH BAO: Loai lenh khong dung cho level nay!");
+      return;
+   }
+   
    // KIEM TRA 1: Da co lenh cho (pending) cung chieu tai level nay chua?
    if(HasBuyOrSellOrderAtLevel(isBuyOrder, priceLevel))
       return;
@@ -968,6 +982,13 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
    // KIEM TRA 2: Da co position dang mo cung chieu tai level nay chua?
    if(HasBuyOrSellPositionAtLevel(isBuyOrder, priceLevel))
       return;
+   
+   // KIEM TRA 3: Kiem tra cau truc tong the tai level (max 1 buy + 1 sell)
+   if(!CheckGridStructureAtLevel(priceLevel, isBuyOrder))
+   {
+      Print(">>> KHONG DAT LENH: Da du cau truc tai level ", DoubleToString(priceLevel, g_digits));
+      return;
+   }
    
    // Da kiem tra ky - Chua co lenh va position, dat lenh moi
    double lot = StartLot;
@@ -1053,6 +1074,104 @@ bool HasBuyOrSellPositionAtLevel(bool isBuy, double level)
       }
    }
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Kiem tra loai lenh co dung cho vi tri (tren/duoi duong vang) khong|
+//| TREN duong vang: chi Sell Limit + Buy Stop                        |
+//| DUOI duong vang: chi Buy Limit + Sell Stop                        |
+//+------------------------------------------------------------------+
+bool IsValidOrderTypeForLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
+{
+   if(g_gridReferencePrice <= 0) return true; // Chua khoi tao, cho phep dat
+   
+   bool isAboveRef = (priceLevel > g_gridReferencePrice);
+   bool isBelowRef = (priceLevel < g_gridReferencePrice);
+   
+   // TREN duong vang: chi Sell Limit + Buy Stop
+   if(isAboveRef)
+   {
+      if(orderType == ORDER_TYPE_SELL_LIMIT || orderType == ORDER_TYPE_BUY_STOP)
+         return true;
+      else
+         return false; // Buy Limit hoac Sell Stop khong dung cho phia tren
+   }
+   
+   // DUOI duong vang: chi Buy Limit + Sell Stop
+   if(isBelowRef)
+   {
+      if(orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_SELL_STOP)
+         return true;
+      else
+         return false; // Sell Limit hoac Buy Stop khong dung cho phia duoi
+   }
+   
+   return true; // Tai dung gia goc, cho phep
+}
+
+//+------------------------------------------------------------------+
+//| Kiem tra cau truc tai level: toi da 1 buy type + 1 sell type     |
+//| Dem ca pending order va position dang mo                         |
+//| Tra ve true neu co the dat them lenh                             |
+//+------------------------------------------------------------------+
+bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
+{
+   double tolerance = g_pipValue * 2;
+   int buyCount = 0;  // Dem Buy Limit/Buy Stop/Buy Position
+   int sellCount = 0; // Dem Sell Limit/Sell Stop/Sell Position
+   
+   // Dem pending orders tai level
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            if(MathAbs(orderInfo.PriceOpen() - priceLevel) < tolerance)
+            {
+               ENUM_ORDER_TYPE ot = orderInfo.OrderType();
+               if(ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP)
+                  buyCount++;
+               else if(ot == ORDER_TYPE_SELL_LIMIT || ot == ORDER_TYPE_SELL_STOP)
+                  sellCount++;
+            }
+         }
+      }
+   }
+   
+   // Dem positions tai level
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         {
+            if(MathAbs(positionInfo.PriceOpen() - priceLevel) < tolerance)
+            {
+               if(positionInfo.PositionType() == POSITION_TYPE_BUY)
+                  buyCount++;
+               else
+                  sellCount++;
+            }
+         }
+      }
+   }
+   
+   // Kiem tra cau truc: toi da 1 buy + 1 sell
+   if(isBuyType)
+   {
+      // Muon dat lenh Buy, kiem tra da co Buy chua
+      if(buyCount >= 1)
+         return false; // Da co 1 Buy, khong dat them
+   }
+   else
+   {
+      // Muon dat lenh Sell, kiem tra da co Sell chua
+      if(sellCount >= 1)
+         return false; // Da co 1 Sell, khong dat them
+   }
+   
+   return true; // Co the dat lenh
 }
 
 //+------------------------------------------------------------------+
@@ -2063,6 +2182,36 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
       ObjectSetString(0, "GM_Panel_RefPrice", OBJPROP_TEXT, "Giá gốc lưới: Chờ khởi tạo...");
       ObjectSetInteger(0, "GM_Panel_RefPrice", OBJPROP_COLOR, clrGray);
    }
+}
+
+//+------------------------------------------------------------------+
+//| Ve duong gia goc luoi mau vang net dut                           |
+//+------------------------------------------------------------------+
+void DrawReferencePriceLine(double price)
+{
+   string lineName = "GM_RefPriceLine";
+   
+   // Xoa duong cu neu ton tai
+   if(ObjectFind(0, lineName) >= 0)
+      ObjectDelete(0, lineName);
+   
+   // Tao duong ngang moi
+   if(!ObjectCreate(0, lineName, OBJ_HLINE, 0, 0, price))
+   {
+      Print(">>> Loi tao duong gia goc: ", GetLastError());
+      return;
+   }
+   
+   // Thiet lap thuoc tinh duong
+   ObjectSetInteger(0, lineName, OBJPROP_COLOR, clrGold);           // Mau vang
+   ObjectSetInteger(0, lineName, OBJPROP_STYLE, STYLE_DASH);        // Net dut
+   ObjectSetInteger(0, lineName, OBJPROP_WIDTH, 2);                 // Do day
+   ObjectSetInteger(0, lineName, OBJPROP_BACK, true);               // Ve phia sau chart
+   ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);        // Khong cho chon
+   ObjectSetInteger(0, lineName, OBJPROP_SELECTED, false);
+   ObjectSetString(0, lineName, OBJPROP_TEXT, "Gia goc luoi");      // Tooltip
+   
+   Print(">>> Da ve duong gia goc luoi tai: ", DoubleToString(price, g_digits));
 }
 
 //+------------------------------------------------------------------+
