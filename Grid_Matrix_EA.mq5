@@ -73,6 +73,10 @@ input group "=== TỰ ĐỘNG RESET EA ==="
 input bool   AutoResetOnTP    = true;          // Tự động reset khi đạt TP
 input bool   AutoResetOnSL    = false;         // Tự động reset khi đạt SL
 
+input group "=== SESSION TARGET (RESET KHI ĐẠT) ==="
+input bool   UseSessionTarget      = true;     // Bật Session Target
+input double SessionTargetMoney    = 10.0;     // Target session (USD)
+
 input group "=== TP TỔNG DỪNG EA ==="
 input double TotalTakeProfitMoney = 500.0;     // TP tổng để dừng EA (USD, 0=tắt)
 
@@ -98,6 +102,10 @@ double         g_maxDrawdown = 0;
 double         g_totalProfitAccum = 0;
 bool           g_isStopped = false;
 bool           g_isPaused = false;
+
+// Session target - dem profit tu cac lenh da TP trong session hien tai
+double         g_sessionClosedProfit = 0;      // Tong profit tu cac lenh da dong trong session
+int            g_sessionTPCount = 0;           // So lan dat TP session
 
 // Dem so lenh TP rieng cho tung loai
 int            g_buyLimitTPCount = 0;
@@ -204,7 +212,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(dealSymbol != _Symbol) return;
    if(dealEntry != DEAL_ENTRY_OUT) return;
    
-   // Dem so lan TP theo loai lenh (cho thong ke)
+   // Dem so lan TP theo loai lenh (cho thong ke) va cong vao session profit
    if(dealReason == DEAL_REASON_TP && dealProfit > 0)
    {
       if(StringFind(dealComment, "_BS#") >= 0)
@@ -216,7 +224,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       else if(StringFind(dealComment, "_SL#") >= 0)
          g_sellLimitTPCount++;
       
+      // Cong profit vao session (cho Session Target)
+      g_sessionClosedProfit += dealProfit;
       Print(">>> Lenh dat TP! Comment: ", dealComment, " Profit: ", DoubleToString(dealProfit, 2));
+      Print(">>> Session da dong: ", DoubleToString(g_sessionClosedProfit, 2), " USD");
    }
 }
 
@@ -298,6 +309,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          g_tpCount = 0;
          g_slCount = 0;
          g_totalProfitAccum = 0;
+         g_sessionClosedProfit = 0;  // Reset session profit
+         g_sessionTPCount = 0;
          g_isStopped = false;
          g_isPaused = true;
          g_isFirstRun = true;
@@ -405,6 +418,49 @@ void OnTick()
    if(ShowPanel)
       UpdatePanel(totalProfit, buyPositions, sellPositions, buyPending, sellPending);
    
+   // === KIEM TRA SESSION TARGET ===
+   // Session Target = Tong profit da dong trong session + floating profit hien tai
+   if(UseSessionTarget && SessionTargetMoney > 0)
+   {
+      double sessionTotal = g_sessionClosedProfit + totalProfit;
+      
+      // Neu dat Session Target va co lenh dang mo
+      if(sessionTotal >= SessionTargetMoney && totalPositions > 0)
+      {
+         Print(">>> SESSION TARGET DAT! Session: ", DoubleToString(sessionTotal, 2), " / ", DoubleToString(SessionTargetMoney, 2), " USD");
+         Print(">>> (Da dong: ", DoubleToString(g_sessionClosedProfit, 2), " + Floating: ", DoubleToString(totalProfit, 2), ")");
+         
+         // Dong tat ca lenh
+         CloseAllPositions();
+         DeleteAllPendingOrders();
+         
+         // Cong vao tong tich luy
+         g_totalProfitAccum += sessionTotal;
+         g_sessionTPCount++;
+         
+         Print(">>> Session TP lan thu: ", g_sessionTPCount);
+         Print(">>> Tong lai tich luy: ", DoubleToString(g_totalProfitAccum, 2), " USD");
+         
+         // Reset session - bat dau vong moi
+         g_sessionClosedProfit = 0;
+         g_buyLimitTPCount = 0;
+         g_sellLimitTPCount = 0;
+         g_buyStopTPCount = 0;
+         g_sellStopTPCount = 0;
+         g_pendingBuyStopRefill = false;
+         g_pendingSellStopRefill = false;
+         g_lastBuyStopOrderPrice = 0;
+         g_lastSellStopOrderPrice = 0;
+         g_gridInitialized = false;
+         
+         Sleep(1000);
+         g_isFirstRun = true;
+         
+         Print(">>> RESET SESSION - Bat dau vong moi!");
+         return;
+      }
+   }
+   
    // Kiem tra TP tong - DUNG EA khi dat du so tien
    if(TotalTakeProfitMoney > 0 && g_totalProfitAccum >= TotalTakeProfitMoney && totalPositions == 0)
    {
@@ -439,6 +495,8 @@ void OnTick()
       {
          Print(">>> TU DONG RESET EA - Bat dau vong moi...");
          Print(">>> Max Drawdown hien tai: ", DoubleToString(g_maxDrawdown, 2), " USD");
+         // Reset session profit (ĐK 1 đạt → reset session)
+         g_sessionClosedProfit = 0;
          // Reset bien dem lenh TP
          g_buyLimitTPCount = 0;
          g_sellLimitTPCount = 0;
@@ -472,6 +530,8 @@ void OnTick()
       {
          Print(">>> TU DONG RESET EA - Bat dau vong moi...");
          Print(">>> Max Drawdown hien tai: ", DoubleToString(g_maxDrawdown, 2), " USD");
+         // Reset session profit (SL đạt → reset session)
+         g_sessionClosedProfit = 0;
          // Reset bien dem lenh TP
          g_buyLimitTPCount = 0;
          g_sellLimitTPCount = 0;
@@ -1855,6 +1915,11 @@ void CreatePanel()
    CreateLabel("GM_Panel_TotalProfit", "Tổng đã đóng: 0.00 / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD", x, y, clrDarkGreen, PanelFontSize);
    y += lineHeight;
    
+   // Session Target
+   string sessionText = UseSessionTarget ? "Session: 0.00 / " + DoubleToString(SessionTargetMoney, 2) + " USD" : "Session Target: TẮT";
+   CreateLabel("GM_Panel_Session", sessionText, x, y, clrMagenta, PanelFontSize);
+   y += lineHeight;
+   
    CreateLabel("GM_Panel_Status", "Trạng thái: ĐANG CHẠY", x, y, clrGreen, PanelFontSize);
    y += lineHeight;
    
@@ -1953,6 +2018,21 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
    ObjectSetString(0, "GM_Panel_TotalProfit", OBJPROP_TEXT, "Tổng đã đóng: " + DoubleToString(g_totalProfitAccum, 2) + " / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD");
    color totalColor = g_totalProfitAccum >= 0 ? clrDarkGreen : clrRed;
    ObjectSetInteger(0, "GM_Panel_TotalProfit", OBJPROP_COLOR, totalColor);
+   
+   // Hien thi Session Target: (Profit da dong trong session + Floating hien tai)
+   if(UseSessionTarget)
+   {
+      double sessionTotal = g_sessionClosedProfit + profit;
+      string sessionText = "Session: " + DoubleToString(sessionTotal, 2) + " / " + DoubleToString(SessionTargetMoney, 2) + " USD";
+      ObjectSetString(0, "GM_Panel_Session", OBJPROP_TEXT, sessionText);
+      color sessionColor = sessionTotal >= SessionTargetMoney ? clrGreen : clrMagenta;
+      ObjectSetInteger(0, "GM_Panel_Session", OBJPROP_COLOR, sessionColor);
+   }
+   else
+   {
+      ObjectSetString(0, "GM_Panel_Session", OBJPROP_TEXT, "Session Target: TẮT");
+      ObjectSetInteger(0, "GM_Panel_Session", OBJPROP_COLOR, clrGray);
+   }
    
    if(g_isStopped)
    {
