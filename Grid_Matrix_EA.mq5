@@ -1005,8 +1005,10 @@ void CleanDuplicateSellOrdersAtLevel(double level, double tolerance)
 }
 
 //+------------------------------------------------------------------+
-//| Dam bao co lenh tai level - tao neu chua co                      |
-//| Moi luoi chi co 1 lenh Buy va 1 lenh Sell                        |
+//| Dam bao co lenh tai level - tao neu chua co (AUTO REFILL)        |
+//| Chi bo sung de HOAN THANH CAP (1 Buy + 1 Sell)                   |
+//| - Neu luoi co Sell (chua co Buy) -> bo sung Buy                  |
+//| - Neu luoi co Buy (chua co Sell) -> bo sung Sell                 |
 //| SU DUNG GRID LEVEL INDEX de xu ly slippage                       |
 //| SU DUNG CountTotalOrdersOfType de tinh lot dung theo nhom        |
 //+------------------------------------------------------------------+
@@ -1019,8 +1021,10 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
    if(!IsValidOrderTypeForLevel(orderType, priceLevel))
       return;
    
-   // KIEM TRA 2: Kiem tra cau truc tai level (max 1 buy + 1 sell) - DA DUNG GRID LEVEL INDEX
-   if(!CheckGridStructureAtLevel(priceLevel, isBuyOrder))
+   // KIEM TRA 2: AUTO REFILL chi bo sung de hoan thanh cap
+   // Neu luoi co Sell -> cho phep bo sung Buy (va nguoc lai)
+   // Neu luoi da du cap -> KHONG bo sung
+   if(!CheckCanRefillAtLevel(priceLevel, isBuyOrder))
       return;
    
    // Da kiem tra ky - Chua co lenh va position, dat lenh moi
@@ -1111,6 +1115,7 @@ bool IsValidOrderTypeForLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
 //| SU DUNG GRID LEVEL INDEX de xu ly slippage                       |
 //| Dem ca pending order va position dang mo                         |
 //| Tra ve true neu co the dat them lenh                             |
+//| Dung cho DAT LENH BAN DAU: cho phep 1 Buy + 1 Sell cung level    |
 //+------------------------------------------------------------------+
 bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
 {
@@ -1157,7 +1162,7 @@ bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
       }
    }
    
-   // Kiem tra cau truc: toi da 1 buy + 1 sell
+   // LOGIC DAT LENH BAN DAU: toi da 1 buy + 1 sell cung level
    if(isBuyType)
    {
       // Muon dat lenh Buy, kiem tra da co Buy chua
@@ -1172,6 +1177,83 @@ bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
    }
    
    return true; // Co the dat lenh
+}
+
+//+------------------------------------------------------------------+
+//| Kiem tra cho AUTO REFILL: Chi bo sung de HOAN THANH CAP          |
+//| - Neu luoi co Sell (chua co Buy) -> cho phep bo sung Buy         |
+//| - Neu luoi co Buy (chua co Sell) -> cho phep bo sung Sell        |
+//| - Neu luoi da du cap (1 Buy + 1 Sell) -> KHONG bo sung           |
+//| - Neu luoi trong -> cho phep bo sung                             |
+//+------------------------------------------------------------------+
+bool CheckCanRefillAtLevel(double priceLevel, bool isBuyType)
+{
+   int targetLevel = GetGridLevelIndex(priceLevel);
+   int buyCount = 0;
+   int sellCount = 0;
+   
+   // Dem pending orders tai CUNG LEVEL INDEX
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            int orderLevel = GetGridLevelIndex(orderInfo.PriceOpen());
+            if(orderLevel == targetLevel)
+            {
+               ENUM_ORDER_TYPE ot = orderInfo.OrderType();
+               if(ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP)
+                  buyCount++;
+               else if(ot == ORDER_TYPE_SELL_LIMIT || ot == ORDER_TYPE_SELL_STOP)
+                  sellCount++;
+            }
+         }
+      }
+   }
+   
+   // Dem positions tai CUNG LEVEL INDEX
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         {
+            int posLevel = GetGridLevelIndex(positionInfo.PriceOpen());
+            if(posLevel == targetLevel)
+            {
+               if(positionInfo.PositionType() == POSITION_TYPE_BUY)
+                  buyCount++;
+               else
+                  sellCount++;
+            }
+         }
+      }
+   }
+   
+   // LOGIC AUTO REFILL: Bo sung de HOAN THANH CAP
+   if(isBuyType)
+   {
+      // Muon bo sung Buy:
+      // - Da co Buy -> KHONG (da du)
+      // - Chua co Buy, co Sell -> OK (bo sung de hoan thanh cap)
+      // - Chua co Buy, chua co Sell -> OK (luoi trong)
+      if(buyCount >= 1)
+         return false; // Da co Buy, khong bo sung them
+      // buyCount = 0 -> cho phep bo sung Buy
+      return true;
+   }
+   else
+   {
+      // Muon bo sung Sell:
+      // - Da co Sell -> KHONG (da du)
+      // - Chua co Sell, co Buy -> OK (bo sung de hoan thanh cap)
+      // - Chua co Sell, chua co Buy -> OK (luoi trong)
+      if(sellCount >= 1)
+         return false; // Da co Sell, khong bo sung them
+      // sellCount = 0 -> cho phep bo sung Sell
+      return true;
+   }
 }
 
 //+------------------------------------------------------------------+
