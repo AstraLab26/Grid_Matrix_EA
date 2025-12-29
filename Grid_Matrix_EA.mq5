@@ -1217,6 +1217,7 @@ bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
 
 //+------------------------------------------------------------------+
 //| Quan ly luoi BUY LIMIT - Bo sung lenh rieng                      |
+//| KIEM TRA KY: Moi level chi co 1 Buy + 1 Sell                     |
 //+------------------------------------------------------------------+
 void ManageGridBuyLimit(int currentOrders)
 {
@@ -1230,6 +1231,15 @@ void ManageGridBuyLimit(int currentOrders)
    for(int i = 0; i < ordersToPlace; i++)
    {
       nextPrice = nextPrice - (GridGapPips * g_pipValue);
+      
+      // KIEM TRA 1: Loai lenh dung vi tri (Buy Limit phai DUOI duong vang)
+      if(!IsValidOrderTypeForLevel(ORDER_TYPE_BUY_LIMIT, nextPrice))
+         continue;
+      
+      // KIEM TRA 2: Cau truc tai level (max 1 Buy + 1 Sell)
+      if(!CheckGridStructureAtLevel(nextPrice, true))
+         continue;
+      
       int orderNum = currentOrders + i + 1;
       double lot = CalculateBuyLimitLot(orderNum);
       PlaceBuyLimit(nextPrice, lot, orderNum);
@@ -1238,6 +1248,7 @@ void ManageGridBuyLimit(int currentOrders)
 
 //+------------------------------------------------------------------+
 //| Quan ly luoi SELL LIMIT - Bo sung lenh rieng                     |
+//| KIEM TRA KY: Moi level chi co 1 Buy + 1 Sell                     |
 //+------------------------------------------------------------------+
 void ManageGridSellLimit(int currentOrders)
 {
@@ -1251,6 +1262,15 @@ void ManageGridSellLimit(int currentOrders)
    for(int i = 0; i < ordersToPlace; i++)
    {
       nextPrice = nextPrice + (GridGapPips * g_pipValue);
+      
+      // KIEM TRA 1: Loai lenh dung vi tri (Sell Limit phai TREN duong vang)
+      if(!IsValidOrderTypeForLevel(ORDER_TYPE_SELL_LIMIT, nextPrice))
+         continue;
+      
+      // KIEM TRA 2: Cau truc tai level (max 1 Buy + 1 Sell)
+      if(!CheckGridStructureAtLevel(nextPrice, false))
+         continue;
+      
       int orderNum = currentOrders + i + 1;
       double lot = CalculateSellLimitLot(orderNum);
       PlaceSellLimit(nextPrice, lot, orderNum);
@@ -1259,6 +1279,7 @@ void ManageGridSellLimit(int currentOrders)
 
 //+------------------------------------------------------------------+
 //| Quan ly luoi BUY STOP - Bo sung lenh rieng                       |
+//| KIEM TRA KY: Moi level chi co 1 Buy + 1 Sell                     |
 //+------------------------------------------------------------------+
 void ManageGridBuyStop(int currentOrders)
 {
@@ -1272,6 +1293,15 @@ void ManageGridBuyStop(int currentOrders)
    for(int i = 0; i < ordersToPlace; i++)
    {
       nextPrice = nextPrice + (GridGapPips * g_pipValue);
+      
+      // KIEM TRA 1: Loai lenh dung vi tri (Buy Stop phai TREN duong vang)
+      if(!IsValidOrderTypeForLevel(ORDER_TYPE_BUY_STOP, nextPrice))
+         continue;
+      
+      // KIEM TRA 2: Cau truc tai level (max 1 Buy + 1 Sell)
+      if(!CheckGridStructureAtLevel(nextPrice, true))
+         continue;
+      
       int orderNum = currentOrders + i + 1;
       double lot = CalculateBuyStopLot(orderNum);
       PlaceBuyStop(nextPrice, lot, orderNum);
@@ -1280,6 +1310,7 @@ void ManageGridBuyStop(int currentOrders)
 
 //+------------------------------------------------------------------+
 //| Quan ly luoi SELL STOP - Bo sung lenh rieng                      |
+//| KIEM TRA KY: Moi level chi co 1 Buy + 1 Sell                     |
 //+------------------------------------------------------------------+
 void ManageGridSellStop(int currentOrders)
 {
@@ -1293,6 +1324,15 @@ void ManageGridSellStop(int currentOrders)
    for(int i = 0; i < ordersToPlace; i++)
    {
       nextPrice = nextPrice - (GridGapPips * g_pipValue);
+      
+      // KIEM TRA 1: Loai lenh dung vi tri (Sell Stop phai DUOI duong vang)
+      if(!IsValidOrderTypeForLevel(ORDER_TYPE_SELL_STOP, nextPrice))
+         continue;
+      
+      // KIEM TRA 2: Cau truc tai level (max 1 Buy + 1 Sell)
+      if(!CheckGridStructureAtLevel(nextPrice, false))
+         continue;
+      
       int orderNum = currentOrders + i + 1;
       double lot = CalculateSellStopLot(orderNum);
       PlaceSellStop(nextPrice, lot, orderNum);
