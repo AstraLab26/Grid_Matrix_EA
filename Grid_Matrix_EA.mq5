@@ -13,6 +13,18 @@
 #include <Trade\OrderInfo.mqh>
 
 //+------------------------------------------------------------------+
+//| ENUM CHẾ ĐỘ GẤP THẾP LOT                                         |
+//+------------------------------------------------------------------+
+enum ENUM_LotScalingMode
+{
+   LotScale_None = 0,           // Không gấp thếp (lot cố định)
+   LotScale_Multiply = 1,       // Gấp thếp NHÂN mỗi bậc
+   LotScale_AddPerLevel = 2,    // Gấp thếp CỘNG mỗi bậc
+   LotScale_MultiplyPerGroup = 3, // Gấp thếp NHÂN theo nhóm lưới
+   LotScale_AddPerGroup = 4     // Gấp thếp CỘNG theo nhóm lưới
+};
+
+//+------------------------------------------------------------------+
 //| THAM SỐ ĐẦU VÀO - INPUT PARAMETERS                               |
 //+------------------------------------------------------------------+
 input group "=== CẤU HÌNH CHÍNH ==="
@@ -20,47 +32,50 @@ input int    MagicNumber      = 123456;        // Mã định danh EA (Magic Num
 input string TradeComment     = "GridMatrix";  // Ghi chú lệnh
 
 input group "=== CẤU HÌNH LƯỚI (GRID) ==="
-input double StartLot         = 0.01;          // Khối lượng lệnh đầu tiên (lots)
 input int    InitialOffsetPips = 20;           // Khoảng cách lệnh đầu từ giá (pips)
 input int    GridGapPips      = 50;            // Khoảng cách giữa các lệnh (pips)
 input int    MaxOrdersPerSide = 5;             // Số lệnh tối đa MỖI CHIỀU
 
 input group "=== BUY LIMIT ==="
 input bool   UseBuyLimit           = true;     // Bật lệnh Buy Limit
-input bool   BuyLimitLotMultiply   = true;     // Gấp thếp NHÂN cho Buy Limit
-input double BuyLimitMultiplier    = 1.5;      // Hệ số nhân Buy Limit
-input bool   BuyLimitLotAdd        = false;    // Gấp thếp CỘNG cho Buy Limit
-input double BuyLimitAddition      = 0.01;     // Bước cộng Buy Limit
+input double BuyLimitStartLot      = 0.01;     // Lot đầu tiên Buy Limit
+input ENUM_LotScalingMode BuyLimitLotMode = LotScale_Multiply; // Chế độ gấp thếp lot
+input double BuyLimitMultiplier    = 1.5;      // Hệ số nhân (khi chọn NHÂN)
+input double BuyLimitAddition      = 0.01;     // Bước cộng lot (khi chọn CỘNG)
+input int    BuyLimitGridsPerGroup = 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseBuyLimitTP         = false;    // Bật TP riêng cho Buy Limit
 input int    BuyLimitTPPips        = 50;       // TP Buy Limit (pips)
 input bool   AutoRefillBuyLimit    = false;    // Tự động bổ sung Buy Limit khi đạt TP
 
 input group "=== SELL LIMIT ==="
 input bool   UseSellLimit          = true;     // Bật lệnh Sell Limit
-input bool   SellLimitLotMultiply  = true;     // Gấp thếp NHÂN cho Sell Limit
-input double SellLimitMultiplier   = 1.5;      // Hệ số nhân Sell Limit
-input bool   SellLimitLotAdd       = false;    // Gấp thếp CỘNG cho Sell Limit
-input double SellLimitAddition     = 0.01;     // Bước cộng Sell Limit
+input double SellLimitStartLot     = 0.01;     // Lot đầu tiên Sell Limit
+input ENUM_LotScalingMode SellLimitLotMode = LotScale_Multiply; // Chế độ gấp thếp lot
+input double SellLimitMultiplier   = 1.5;      // Hệ số nhân (khi chọn NHÂN)
+input double SellLimitAddition     = 0.01;     // Bước cộng lot (khi chọn CỘNG)
+input int    SellLimitGridsPerGroup= 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseSellLimitTP        = false;    // Bật TP riêng cho Sell Limit
 input int    SellLimitTPPips       = 50;       // TP Sell Limit (pips)
 input bool   AutoRefillSellLimit   = false;    // Tự động bổ sung Sell Limit khi đạt TP
 
 input group "=== BUY STOP ==="
 input bool   UseBuyStop            = false;    // Bật lệnh Buy Stop
-input bool   BuyStopLotMultiply    = false;    // Gấp thếp NHÂN cho Buy Stop
-input double BuyStopMultiplier     = 1.5;      // Hệ số nhân Buy Stop
-input bool   BuyStopLotAdd         = false;    // Gấp thếp CỘNG cho Buy Stop
-input double BuyStopAddition       = 0.01;     // Bước cộng Buy Stop
+input double BuyStopStartLot       = 0.01;     // Lot đầu tiên Buy Stop
+input ENUM_LotScalingMode BuyStopLotMode = LotScale_None; // Chế độ gấp thếp lot
+input double BuyStopMultiplier     = 1.5;      // Hệ số nhân (khi chọn NHÂN)
+input double BuyStopAddition       = 0.01;     // Bước cộng lot (khi chọn CỘNG)
+input int    BuyStopGridsPerGroup  = 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseBuyStopTP          = false;    // Bật TP riêng cho Buy Stop
 input int    BuyStopTPPips         = 50;       // TP Buy Stop (pips)
 input bool   AutoRefillBuyStop     = false;    // Tự động bổ sung Buy Stop khi đạt TP
 
 input group "=== SELL STOP ==="
 input bool   UseSellStop           = false;    // Bật lệnh Sell Stop
-input bool   SellStopLotMultiply   = false;    // Gấp thếp NHÂN cho Sell Stop
-input double SellStopMultiplier    = 1.5;      // Hệ số nhân Sell Stop
-input bool   SellStopLotAdd        = false;    // Gấp thếp CỘNG cho Sell Stop
-input double SellStopAddition      = 0.01;     // Bước cộng Sell Stop
+input double SellStopStartLot      = 0.01;     // Lot đầu tiên Sell Stop
+input ENUM_LotScalingMode SellStopLotMode = LotScale_None; // Chế độ gấp thếp lot
+input double SellStopMultiplier    = 1.5;      // Hệ số nhân (khi chọn NHÂN)
+input double SellStopAddition      = 0.01;     // Bước cộng lot (khi chọn CỘNG)
+input int    SellStopGridsPerGroup = 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseSellStopTP         = false;    // Bật TP riêng cho Sell Stop
 input int    SellStopTPPips        = 50;       // TP Sell Stop (pips)
 input bool   AutoRefillSellStop    = false;    // Tự động bổ sung Sell Stop khi đạt TP
@@ -131,6 +146,10 @@ int            g_gridSellStopCount = 0;       // So luong level Sell Stop
 bool           g_gridInitialized = false;     // Da khoi tao grid chua
 double         g_gridReferencePrice = 0;      // Gia tham chieu lam goc cho luoi
 
+// Thong ke max tu luc bat EA (KHONG reset)
+double         g_maxLotUsed = 0;             // Lot lon nhat ma GIA DA CHAM (kich hoat lenh)
+int            g_maxGridLevel = 0;           // Bac luoi lon nhat ma GIA DA CHAM
+
 //+------------------------------------------------------------------+
 //| Ham khoi tao EA                                                  |
 //+------------------------------------------------------------------+
@@ -163,7 +182,7 @@ int OnInit()
    Print("=== GRID MATRIX EA v1.0 da khoi dong ===");
    Print("Cap tien: ", _Symbol);
    Print("Khoang cach Grid: ", GridGapPips, " pips = ", DoubleToString(GridGapPips * g_pipValue, g_digits));
-   Print("Lot dau: ", StartLot);
+   Print("Lot dau: BL=", BuyLimitStartLot, " SL=", SellLimitStartLot, " BS=", BuyStopStartLot, " SS=", SellStopStartLot);
    Print("So lenh toi da moi chieu: ", MaxOrdersPerSide);
    Print("Buy Limit: ", UseBuyLimit ? "BAT" : "TAT", " | Sell Limit: ", UseSellLimit ? "BAT" : "TAT");
    Print("Buy Stop: ", UseBuyStop ? "BAT" : "TAT", " | Sell Stop: ", UseSellStop ? "BAT" : "TAT");
@@ -207,28 +226,51 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    long dealReason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
    double dealProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
    string dealComment = HistoryDealGetString(dealTicket, DEAL_COMMENT);
+   double dealVolume = HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
+   double dealPrice = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
    
-   // Chi xu ly lenh cua EA nay, tren symbol nay, khi DONG vi the
+   // Chi xu ly lenh cua EA nay, tren symbol nay
    if(dealMagic != MagicNumber) return;
    if(dealSymbol != _Symbol) return;
-   if(dealEntry != DEAL_ENTRY_OUT) return;
    
-   // Dem so lan TP theo loai lenh (cho thong ke) va cong vao session profit
-   if(dealReason == DEAL_REASON_TP && dealProfit > 0)
+   // XU LY KHI LENH PENDING DUOC KICH HOAT (ENTRY_IN) - Track Max Lot va Max Bac
+   if(dealEntry == DEAL_ENTRY_IN && g_gridReferencePrice > 0)
    {
-      if(StringFind(dealComment, "_BS#") >= 0)
-         g_buyStopTPCount++;
-      else if(StringFind(dealComment, "_SS#") >= 0)
-         g_sellStopTPCount++;
-      else if(StringFind(dealComment, "_BL#") >= 0)
-         g_buyLimitTPCount++;
-      else if(StringFind(dealComment, "_SL#") >= 0)
-         g_sellLimitTPCount++;
+      // Tinh bac luoi dua tren khoang cach tu gia goc
+      double distance = MathAbs(dealPrice - g_gridReferencePrice);
+      double gridGap = GridGapPips * g_pipValue;
+      int gridLevel = (int)MathRound(distance / gridGap);
       
-      // Cong profit vao session (cho Session Target)
-      g_sessionClosedProfit += dealProfit;
-      Print(">>> Lenh dat TP! Comment: ", dealComment, " Profit: ", DoubleToString(dealProfit, 2));
-      Print(">>> Session da dong: ", DoubleToString(g_sessionClosedProfit, 2), " USD");
+      // Cap nhat Max Lot va Max Grid Level (gia da cham den)
+      if(dealVolume > g_maxLotUsed)
+         g_maxLotUsed = dealVolume;
+      if(gridLevel > g_maxGridLevel)
+         g_maxGridLevel = gridLevel;
+      
+      Print(">>> GIA CHAM BAC ", gridLevel, " | Lot: ", DoubleToString(dealVolume, 2), 
+            " | Max Lot: ", DoubleToString(g_maxLotUsed, 2), " | Max Bac: ", g_maxGridLevel);
+   }
+   
+   // XU LY KHI DONG VI THE (ENTRY_OUT) - Dem TP va Session profit
+   if(dealEntry == DEAL_ENTRY_OUT)
+   {
+      // Dem so lan TP theo loai lenh (cho thong ke) va cong vao session profit
+      if(dealReason == DEAL_REASON_TP && dealProfit > 0)
+      {
+         if(StringFind(dealComment, "_BS#") >= 0)
+            g_buyStopTPCount++;
+         else if(StringFind(dealComment, "_SS#") >= 0)
+            g_sellStopTPCount++;
+         else if(StringFind(dealComment, "_BL#") >= 0)
+            g_buyLimitTPCount++;
+         else if(StringFind(dealComment, "_SL#") >= 0)
+            g_sellLimitTPCount++;
+         
+         // Cong profit vao session (cho Session Target)
+         g_sessionClosedProfit += dealProfit;
+         Print(">>> Lenh dat TP! Comment: ", dealComment, " Profit: ", DoubleToString(dealProfit, 2));
+         Print(">>> Session da dong: ", DoubleToString(g_sessionClosedProfit, 2), " USD");
+      }
    }
 }
 
@@ -991,27 +1033,26 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
    }
    
    // Da kiem tra ky - Chua co lenh va position, dat lenh moi
-   double lot = StartLot;
    double price = NormalizeDouble(priceLevel, g_digits);
    
    if(orderType == ORDER_TYPE_BUY_LIMIT)
    {
-      if(PlaceBuyLimit(price, lot, 0))
+      if(PlaceBuyLimit(price, BuyLimitStartLot, 0))
          Print(">>> AUTO REFILL: Dat lai Buy Limit tai ", DoubleToString(price, g_digits));
    }
    else if(orderType == ORDER_TYPE_SELL_LIMIT)
    {
-      if(PlaceSellLimit(price, lot, 0))
+      if(PlaceSellLimit(price, SellLimitStartLot, 0))
          Print(">>> AUTO REFILL: Dat lai Sell Limit tai ", DoubleToString(price, g_digits));
    }
    else if(orderType == ORDER_TYPE_BUY_STOP)
    {
-      if(PlaceBuyStop(price, lot, 0))
+      if(PlaceBuyStop(price, BuyStopStartLot, 0))
          Print(">>> AUTO REFILL: Dat lai Buy Stop tai ", DoubleToString(price, g_digits));
    }
    else if(orderType == ORDER_TYPE_SELL_STOP)
    {
-      if(PlaceSellStop(price, lot, 0))
+      if(PlaceSellStop(price, SellStopStartLot, 0))
          Print(">>> AUTO REFILL: Dat lai Sell Stop tai ", DoubleToString(price, g_digits));
    }
 }
@@ -1442,17 +1483,33 @@ void CountPositionsByType(int &buyPositions, int &sellPositions)
 //+------------------------------------------------------------------+
 double CalculateBuyLimitLot(int orderNumber)
 {
-   double lot = StartLot;
+   double lot = BuyLimitStartLot;
    
-   if(BuyLimitLotMultiply)
+   switch(BuyLimitLotMode)
    {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot * BuyLimitMultiplier;
-   }
-   else if(BuyLimitLotAdd)
-   {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot + BuyLimitAddition;
+      case LotScale_Multiply:
+         for(int i = 1; i < orderNumber; i++)
+            lot = lot * BuyLimitMultiplier;
+         break;
+      case LotScale_AddPerLevel:
+         lot = BuyLimitStartLot + ((orderNumber - 1) * BuyLimitAddition);
+         break;
+      case LotScale_MultiplyPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / BuyLimitGridsPerGroup;
+            for(int i = 0; i < groupIndex; i++)
+               lot = lot * BuyLimitMultiplier;
+         }
+         break;
+      case LotScale_AddPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / BuyLimitGridsPerGroup;
+            lot = BuyLimitStartLot + (groupIndex * BuyLimitAddition);
+         }
+         break;
+      default: // LotScale_None
+         lot = BuyLimitStartLot;
+         break;
    }
    
    return NormalizeLot(lot);
@@ -1463,17 +1520,33 @@ double CalculateBuyLimitLot(int orderNumber)
 //+------------------------------------------------------------------+
 double CalculateSellLimitLot(int orderNumber)
 {
-   double lot = StartLot;
+   double lot = SellLimitStartLot;
    
-   if(SellLimitLotMultiply)
+   switch(SellLimitLotMode)
    {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot * SellLimitMultiplier;
-   }
-   else if(SellLimitLotAdd)
-   {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot + SellLimitAddition;
+      case LotScale_Multiply:
+         for(int i = 1; i < orderNumber; i++)
+            lot = lot * SellLimitMultiplier;
+         break;
+      case LotScale_AddPerLevel:
+         lot = SellLimitStartLot + ((orderNumber - 1) * SellLimitAddition);
+         break;
+      case LotScale_MultiplyPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / SellLimitGridsPerGroup;
+            for(int i = 0; i < groupIndex; i++)
+               lot = lot * SellLimitMultiplier;
+         }
+         break;
+      case LotScale_AddPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / SellLimitGridsPerGroup;
+            lot = SellLimitStartLot + (groupIndex * SellLimitAddition);
+         }
+         break;
+      default: // LotScale_None
+         lot = SellLimitStartLot;
+         break;
    }
    
    return NormalizeLot(lot);
@@ -1484,17 +1557,33 @@ double CalculateSellLimitLot(int orderNumber)
 //+------------------------------------------------------------------+
 double CalculateBuyStopLot(int orderNumber)
 {
-   double lot = StartLot;
+   double lot = BuyStopStartLot;
    
-   if(BuyStopLotMultiply)
+   switch(BuyStopLotMode)
    {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot * BuyStopMultiplier;
-   }
-   else if(BuyStopLotAdd)
-   {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot + BuyStopAddition;
+      case LotScale_Multiply:
+         for(int i = 1; i < orderNumber; i++)
+            lot = lot * BuyStopMultiplier;
+         break;
+      case LotScale_AddPerLevel:
+         lot = BuyStopStartLot + ((orderNumber - 1) * BuyStopAddition);
+         break;
+      case LotScale_MultiplyPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / BuyStopGridsPerGroup;
+            for(int i = 0; i < groupIndex; i++)
+               lot = lot * BuyStopMultiplier;
+         }
+         break;
+      case LotScale_AddPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / BuyStopGridsPerGroup;
+            lot = BuyStopStartLot + (groupIndex * BuyStopAddition);
+         }
+         break;
+      default: // LotScale_None
+         lot = BuyStopStartLot;
+         break;
    }
    
    return NormalizeLot(lot);
@@ -1505,17 +1594,33 @@ double CalculateBuyStopLot(int orderNumber)
 //+------------------------------------------------------------------+
 double CalculateSellStopLot(int orderNumber)
 {
-   double lot = StartLot;
+   double lot = SellStopStartLot;
    
-   if(SellStopLotMultiply)
+   switch(SellStopLotMode)
    {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot * SellStopMultiplier;
-   }
-   else if(SellStopLotAdd)
-   {
-      for(int i = 1; i < orderNumber; i++)
-         lot = lot + SellStopAddition;
+      case LotScale_Multiply:
+         for(int i = 1; i < orderNumber; i++)
+            lot = lot * SellStopMultiplier;
+         break;
+      case LotScale_AddPerLevel:
+         lot = SellStopStartLot + ((orderNumber - 1) * SellStopAddition);
+         break;
+      case LotScale_MultiplyPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / SellStopGridsPerGroup;
+            for(int i = 0; i < groupIndex; i++)
+               lot = lot * SellStopMultiplier;
+         }
+         break;
+      case LotScale_AddPerGroup:
+         {
+            int groupIndex = (orderNumber - 1) / SellStopGridsPerGroup;
+            lot = SellStopStartLot + (groupIndex * SellStopAddition);
+         }
+         break;
+      default: // LotScale_None
+         lot = SellStopStartLot;
+         break;
    }
    
    return NormalizeLot(lot);
@@ -2047,6 +2152,10 @@ void CreatePanel()
    y += lineHeight;
    
    CreateLabel("GM_Panel_Count", "TP: 0 lần | SL: 0 lần", x, y, clrGray, PanelFontSize);
+   y += lineHeight;
+   
+   // Max Lot va Max Grid Level (KHONG reset)
+   CreateLabel("GM_Panel_MaxLot", "Max Lot: 0.00 | Max Bậc: 0", x, y, clrDarkOrange, PanelFontSize);
    y += lineHeight + 5;
    
    CreateButton("GM_Btn_Start", "BẬT EA", x, y, 60, 22, clrWhite, clrGreen);
@@ -2170,6 +2279,9 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
    }
    
    ObjectSetString(0, "GM_Panel_Count", OBJPROP_TEXT, "TP: " + IntegerToString(g_tpCount) + " lần | SL: " + IntegerToString(g_slCount) + " lần");
+   
+   // Hien thi Max Lot va Max Grid Level (KHONG reset - chi reset khi tat/bat lai EA)
+   ObjectSetString(0, "GM_Panel_MaxLot", OBJPROP_TEXT, "Max Lot: " + DoubleToString(g_maxLotUsed, 2) + " | Max Bậc: " + IntegerToString(g_maxGridLevel));
    
    // Hien thi gia tham chieu
    if(g_gridReferencePrice > 0)
