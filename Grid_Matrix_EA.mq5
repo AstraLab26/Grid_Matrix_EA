@@ -653,6 +653,10 @@ void PlaceAllGridOrders()
    Print(">>> Gia lenh dau DUOI: ", DoubleToString(midPrice - (InitialOffsetPips * g_pipValue), g_digits));
    Print(">>> Gia lenh dau TREN: ", DoubleToString(midPrice + (InitialOffsetPips * g_pipValue), g_digits));
    
+   // QUAN TRONG: Thiet lap g_gridReferencePrice TRUOC khi dat lenh
+   // De GetGridLevelIndex() va CheckGridStructureAtLevel() hoat dong dung
+   g_gridReferencePrice = midPrice;
+   
    // Reset cac mang level
    g_gridBuyLimitCount = 0;
    g_gridSellLimitCount = 0;
@@ -720,7 +724,7 @@ void PlaceAllGridOrders()
    }
    
    g_gridInitialized = true;
-   g_gridReferencePrice = midPrice;  // Luu gia tham chieu
+   // g_gridReferencePrice da duoc thiet lap truoc khi dat lenh (o tren)
    
    // Ve duong gia goc luoi mau vang net dut
    DrawReferencePriceLine(g_gridReferencePrice);
@@ -1003,118 +1007,71 @@ void CleanDuplicateSellOrdersAtLevel(double level, double tolerance)
 //+------------------------------------------------------------------+
 //| Dam bao co lenh tai level - tao neu chua co                      |
 //| Moi luoi chi co 1 lenh Buy va 1 lenh Sell                        |
-//| Kiem tra ky: pending order + position dang mo                    |
+//| SU DUNG GRID LEVEL INDEX de xu ly slippage                       |
+//| SU DUNG CountTotalOrdersOfType de tinh lot dung theo nhom        |
 //+------------------------------------------------------------------+
 void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
 {
    // Xac dinh day la lenh Buy hay Sell
    bool isBuyOrder = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP);
    
-   // KIEM TRA 0: Kiem tra cau truc dung theo vi tri so voi duong vang
+   // KIEM TRA 1: Kiem tra cau truc dung theo vi tri so voi duong vang
    if(!IsValidOrderTypeForLevel(orderType, priceLevel))
-   {
-      Print(">>> CANH BAO: Loai lenh khong dung cho level nay!");
-      return;
-   }
-   
-   // KIEM TRA 1: Da co lenh cho (pending) cung chieu tai level nay chua?
-   if(HasBuyOrSellOrderAtLevel(isBuyOrder, priceLevel))
       return;
    
-   // KIEM TRA 2: Da co position dang mo cung chieu tai level nay chua?
-   if(HasBuyOrSellPositionAtLevel(isBuyOrder, priceLevel))
-      return;
-   
-   // KIEM TRA 3: Kiem tra cau truc tong the tai level (max 1 buy + 1 sell)
+   // KIEM TRA 2: Kiem tra cau truc tai level (max 1 buy + 1 sell) - DA DUNG GRID LEVEL INDEX
    if(!CheckGridStructureAtLevel(priceLevel, isBuyOrder))
-   {
-      Print(">>> KHONG DAT LENH: Da du cau truc tai level ", DoubleToString(priceLevel, g_digits));
       return;
-   }
    
    // Da kiem tra ky - Chua co lenh va position, dat lenh moi
    double price = NormalizeDouble(priceLevel, g_digits);
    
+   // TINH ORDER NUMBER = so lenh hien co + 1 (de tinh lot theo nhom dung)
+   int currentCount = CountTotalOrdersOfType(orderType);
+   int orderNum = currentCount + 1;
+   
    if(orderType == ORDER_TYPE_BUY_LIMIT)
    {
-      if(PlaceBuyLimit(price, BuyLimitStartLot, 0))
-         Print(">>> AUTO REFILL: Dat lai Buy Limit tai ", DoubleToString(price, g_digits));
+      double lot = CalculateBuyLimitLot(orderNum);
+      if(PlaceBuyLimit(price, lot, orderNum))
+         Print(">>> AUTO REFILL: Dat lai Buy Limit #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
    }
    else if(orderType == ORDER_TYPE_SELL_LIMIT)
    {
-      if(PlaceSellLimit(price, SellLimitStartLot, 0))
-         Print(">>> AUTO REFILL: Dat lai Sell Limit tai ", DoubleToString(price, g_digits));
+      double lot = CalculateSellLimitLot(orderNum);
+      if(PlaceSellLimit(price, lot, orderNum))
+         Print(">>> AUTO REFILL: Dat lai Sell Limit #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
    }
    else if(orderType == ORDER_TYPE_BUY_STOP)
    {
-      if(PlaceBuyStop(price, BuyStopStartLot, 0))
-         Print(">>> AUTO REFILL: Dat lai Buy Stop tai ", DoubleToString(price, g_digits));
+      double lot = CalculateBuyStopLot(orderNum);
+      if(PlaceBuyStop(price, lot, orderNum))
+         Print(">>> AUTO REFILL: Dat lai Buy Stop #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
    }
    else if(orderType == ORDER_TYPE_SELL_STOP)
    {
-      if(PlaceSellStop(price, SellStopStartLot, 0))
-         Print(">>> AUTO REFILL: Dat lai Sell Stop tai ", DoubleToString(price, g_digits));
+      double lot = CalculateSellStopLot(orderNum);
+      if(PlaceSellStop(price, lot, orderNum))
+         Print(">>> AUTO REFILL: Dat lai Sell Stop #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
    }
 }
 
 //+------------------------------------------------------------------+
-//| Kiem tra da co lenh cho (pending) Buy hoac Sell tai level chua   |
-//| isBuy = true: kiem tra Buy Limit + Buy Stop                      |
-//| isBuy = false: kiem tra Sell Limit + Sell Stop                   |
+//| HELPER: Chuyen gia thanh grid level index (so nguyen)            |
+//| Level 0 = gia goc, Level 1 = cach 1 GridGap, Level -1 = duoi...  |
+//| Dung round() de xu ly slippage                                   |
 //+------------------------------------------------------------------+
-bool HasBuyOrSellOrderAtLevel(bool isBuy, double level)
+int GetGridLevelIndex(double price)
 {
-   double tolerance = g_pipValue * 2; // Sai so 2 pips
+   if(g_gridReferencePrice <= 0) return 0;
    
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-   {
-      if(orderInfo.SelectByIndex(i))
-      {
-         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
-         {
-            ENUM_ORDER_TYPE ot = orderInfo.OrderType();
-            bool isOrderBuy = (ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP);
-            
-            // Chi kiem tra lenh cung chieu (Buy hoac Sell)
-            if(isOrderBuy == isBuy)
-            {
-               if(MathAbs(orderInfo.PriceOpen() - level) < tolerance)
-                  return true;
-            }
-         }
-      }
-   }
-   return false;
-}
-
-//+------------------------------------------------------------------+
-//| Kiem tra da co position dang mo Buy hoac Sell tai level chua     |
-//| isBuy = true: kiem tra position Buy                              |
-//| isBuy = false: kiem tra position Sell                            |
-//+------------------------------------------------------------------+
-bool HasBuyOrSellPositionAtLevel(bool isBuy, double level)
-{
-   double tolerance = g_pipValue * 2; // Sai so 2 pips
+   double gridGap = GridGapPips * g_pipValue;
+   if(gridGap <= 0) return 0;
    
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if(positionInfo.SelectByIndex(i))
-      {
-         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
-         {
-            ENUM_POSITION_TYPE pt = positionInfo.PositionType();
-            bool isPosBuy = (pt == POSITION_TYPE_BUY);
-            
-            // Chi kiem tra position cung chieu (Buy hoac Sell)
-            if(isPosBuy == isBuy)
-            {
-               if(MathAbs(positionInfo.PriceOpen() - level) < tolerance)
-                  return true;
-            }
-         }
-      }
-   }
-   return false;
+   double distance = price - g_gridReferencePrice;
+   int levelIndex = (int)MathRound(distance / gridGap);
+   
+   return levelIndex;
 }
 
 //+------------------------------------------------------------------+
@@ -1126,11 +1083,10 @@ bool IsValidOrderTypeForLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
 {
    if(g_gridReferencePrice <= 0) return true; // Chua khoi tao, cho phep dat
    
-   bool isAboveRef = (priceLevel > g_gridReferencePrice);
-   bool isBelowRef = (priceLevel < g_gridReferencePrice);
+   int levelIndex = GetGridLevelIndex(priceLevel);
    
-   // TREN duong vang: chi Sell Limit + Buy Stop
-   if(isAboveRef)
+   // TREN duong vang (levelIndex > 0): chi Sell Limit + Buy Stop
+   if(levelIndex > 0)
    {
       if(orderType == ORDER_TYPE_SELL_LIMIT || orderType == ORDER_TYPE_BUY_STOP)
          return true;
@@ -1138,8 +1094,8 @@ bool IsValidOrderTypeForLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
          return false; // Buy Limit hoac Sell Stop khong dung cho phia tren
    }
    
-   // DUOI duong vang: chi Buy Limit + Sell Stop
-   if(isBelowRef)
+   // DUOI duong vang (levelIndex < 0): chi Buy Limit + Sell Stop
+   if(levelIndex < 0)
    {
       if(orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_SELL_STOP)
          return true;
@@ -1147,28 +1103,30 @@ bool IsValidOrderTypeForLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
          return false; // Sell Limit hoac Buy Stop khong dung cho phia duoi
    }
    
-   return true; // Tai dung gia goc, cho phep
+   return true; // Tai dung gia goc (levelIndex == 0), cho phep
 }
 
 //+------------------------------------------------------------------+
 //| Kiem tra cau truc tai level: toi da 1 buy type + 1 sell type     |
+//| SU DUNG GRID LEVEL INDEX de xu ly slippage                       |
 //| Dem ca pending order va position dang mo                         |
 //| Tra ve true neu co the dat them lenh                             |
 //+------------------------------------------------------------------+
 bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
 {
-   double tolerance = g_pipValue * 2;
+   int targetLevel = GetGridLevelIndex(priceLevel);
    int buyCount = 0;  // Dem Buy Limit/Buy Stop/Buy Position
    int sellCount = 0; // Dem Sell Limit/Sell Stop/Sell Position
    
-   // Dem pending orders tai level
+   // Dem pending orders tai CUNG LEVEL INDEX
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       if(orderInfo.SelectByIndex(i))
       {
          if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
          {
-            if(MathAbs(orderInfo.PriceOpen() - priceLevel) < tolerance)
+            int orderLevel = GetGridLevelIndex(orderInfo.PriceOpen());
+            if(orderLevel == targetLevel)
             {
                ENUM_ORDER_TYPE ot = orderInfo.OrderType();
                if(ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP)
@@ -1180,14 +1138,15 @@ bool CheckGridStructureAtLevel(double priceLevel, bool isBuyType)
       }
    }
    
-   // Dem positions tai level
+   // Dem positions tai CUNG LEVEL INDEX (xu ly slippage)
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(positionInfo.SelectByIndex(i))
       {
          if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
          {
-            if(MathAbs(positionInfo.PriceOpen() - priceLevel) < tolerance)
+            int posLevel = GetGridLevelIndex(positionInfo.PriceOpen());
+            if(posLevel == targetLevel)
             {
                if(positionInfo.PositionType() == POSITION_TYPE_BUY)
                   buyCount++;
@@ -1686,6 +1645,7 @@ double NormalizeLot(double lot)
 
 //+------------------------------------------------------------------+
 //| Dat lenh Buy Stop                                                |
+//| KIEM TRA CUOI CUNG truoc khi gui lenh                            |
 //+------------------------------------------------------------------+
 bool PlaceBuyStop(double price, double lot, int orderNum)
 {
@@ -1693,21 +1653,16 @@ bool PlaceBuyStop(double price, double lot, int orderNum)
    
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    if(price <= currentAsk)
-   {
       return false;
-   }
    
-   if(IsOrderAtPrice(price, ORDER_TYPE_BUY_STOP))
-   {
+   // KIEM TRA CUOI CUNG: Cau truc tai level (max 1 Buy + 1 Sell) - DUNG GRID LEVEL INDEX
+   if(!CheckGridStructureAtLevel(price, true))
       return false;
-   }
    
    // Tinh TP neu bat
    double tp = 0;
    if(UseBuyStopTP && BuyStopTPPips > 0)
-   {
       tp = NormalizeDouble(price + BuyStopTPPips * g_pipValue, g_digits);
-   }
    
    string comment = TradeComment + "_BS#" + IntegerToString(orderNum);
    
@@ -1725,6 +1680,7 @@ bool PlaceBuyStop(double price, double lot, int orderNum)
 
 //+------------------------------------------------------------------+
 //| Dat lenh Sell Stop                                               |
+//| KIEM TRA CUOI CUNG truoc khi gui lenh                            |
 //+------------------------------------------------------------------+
 bool PlaceSellStop(double price, double lot, int orderNum)
 {
@@ -1732,21 +1688,16 @@ bool PlaceSellStop(double price, double lot, int orderNum)
    
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    if(price >= currentBid)
-   {
       return false;
-   }
    
-   if(IsOrderAtPrice(price, ORDER_TYPE_SELL_STOP))
-   {
+   // KIEM TRA CUOI CUNG: Cau truc tai level (max 1 Buy + 1 Sell) - DUNG GRID LEVEL INDEX
+   if(!CheckGridStructureAtLevel(price, false))
       return false;
-   }
    
    // Tinh TP neu bat
    double tp = 0;
    if(UseSellStopTP && SellStopTPPips > 0)
-   {
       tp = NormalizeDouble(price - SellStopTPPips * g_pipValue, g_digits);
-   }
    
    string comment = TradeComment + "_SS#" + IntegerToString(orderNum);
    
@@ -1764,6 +1715,7 @@ bool PlaceSellStop(double price, double lot, int orderNum)
 
 //+------------------------------------------------------------------+
 //| Dat lenh Buy Limit                                               |
+//| KIEM TRA CUOI CUNG truoc khi gui lenh                            |
 //+------------------------------------------------------------------+
 bool PlaceBuyLimit(double price, double lot, int orderNum)
 {
@@ -1771,21 +1723,16 @@ bool PlaceBuyLimit(double price, double lot, int orderNum)
    
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    if(price >= currentAsk)
-   {
       return false;
-   }
    
-   if(IsOrderAtPrice(price, ORDER_TYPE_BUY_LIMIT))
-   {
+   // KIEM TRA CUOI CUNG: Cau truc tai level (max 1 Buy + 1 Sell) - DUNG GRID LEVEL INDEX
+   if(!CheckGridStructureAtLevel(price, true))
       return false;
-   }
    
    // Tinh TP neu bat
    double tp = 0;
    if(UseBuyLimitTP && BuyLimitTPPips > 0)
-   {
       tp = NormalizeDouble(price + BuyLimitTPPips * g_pipValue, g_digits);
-   }
    
    string comment = TradeComment + "_BL#" + IntegerToString(orderNum);
    
@@ -1803,6 +1750,7 @@ bool PlaceBuyLimit(double price, double lot, int orderNum)
 
 //+------------------------------------------------------------------+
 //| Dat lenh Sell Limit                                              |
+//| KIEM TRA CUOI CUNG truoc khi gui lenh                            |
 //+------------------------------------------------------------------+
 bool PlaceSellLimit(double price, double lot, int orderNum)
 {
@@ -1810,21 +1758,16 @@ bool PlaceSellLimit(double price, double lot, int orderNum)
    
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    if(price <= currentBid)
-   {
       return false;
-   }
    
-   if(IsOrderAtPrice(price, ORDER_TYPE_SELL_LIMIT))
-   {
+   // KIEM TRA CUOI CUNG: Cau truc tai level (max 1 Buy + 1 Sell) - DUNG GRID LEVEL INDEX
+   if(!CheckGridStructureAtLevel(price, false))
       return false;
-   }
    
    // Tinh TP neu bat
    double tp = 0;
    if(UseSellLimitTP && SellLimitTPPips > 0)
-   {
       tp = NormalizeDouble(price - SellLimitTPPips * g_pipValue, g_digits);
-   }
    
    string comment = TradeComment + "_SL#" + IntegerToString(orderNum);
    
