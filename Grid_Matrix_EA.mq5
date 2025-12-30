@@ -88,6 +88,10 @@ input group "=== TỰ ĐỘNG RESET EA ==="
 input bool   AutoResetOnTP    = true;          // Tự động reset khi đạt TP
 input bool   AutoResetOnSL    = false;         // Tự động reset khi đạt SL
 
+input group "=== THỜI GIAN CHỜ SAU KHI ĐẠT TP/SESSION ==="
+input bool   UseCooldownAfterTP    = true;     // Bật chờ sau khi đạt TP/Session
+input int    CooldownMinutes       = 5;        // Số phút chờ trước khi vào lệnh lại
+
 input group "=== SESSION TARGET (RESET KHI ĐẠT) ==="
 input bool   UseSessionTarget      = true;     // Bật Session Target
 input double SessionTargetMoney    = 10.0;     // Target session (USD)
@@ -169,6 +173,11 @@ double         g_gridSellStopLots[100];       // Lot tinh san cho tung bac Sell 
 // Thong ke max tu luc bat EA (KHONG reset)
 double         g_maxLotUsed = 0;             // Lot lon nhat ma GIA DA CHAM (kich hoat lenh)
 int            g_maxGridLevel = 0;           // Bac luoi lon nhat ma GIA DA CHAM
+
+// COUNTDOWN sau khi dat TP/Session Target
+bool           g_isInCooldown = false;        // Dang trong thoi gian cho
+datetime       g_cooldownEndTime = 0;         // Thoi gian ket thuc countdown
+int            g_cooldownSecondsRemaining = 0;// So giay con lai
 
 //+------------------------------------------------------------------+
 //| Ham khoi tao EA                                                  |
@@ -467,6 +476,22 @@ void OnTick()
       return;
    }
    
+   // === KIEM TRA COOLDOWN ===
+   // Neu dang trong thoi gian cho, chi cap nhat panel va khong vao lenh moi
+   if(UpdateCooldown())
+   {
+      if(ShowPanel)
+      {
+         double totalProfit = CalculateTotalProfit();
+         int buyPos = CountPositions(POSITION_TYPE_BUY);
+         int sellPos = CountPositions(POSITION_TYPE_SELL);
+         int buyPend = CountPendingOrders(ORDER_TYPE_BUY_LIMIT);
+         int sellPend = CountPendingOrders(ORDER_TYPE_SELL_LIMIT);
+         UpdatePanel(totalProfit, buyPos, sellPos, buyPend, sellPend);
+      }
+      return;
+   }
+   
    // Chi tinh toan khi EA dang chay
    double totalProfit = CalculateTotalProfit();
    int buyPositions = CountPositions(POSITION_TYPE_BUY);
@@ -496,9 +521,8 @@ void OnTick()
          Print(">>> SESSION TARGET DAT! Session: ", DoubleToString(sessionTotal, 2), " / ", DoubleToString(SessionTargetMoney, 2), " USD");
          Print(">>> (Da dong: ", DoubleToString(g_sessionClosedProfit, 2), " + Floating: ", DoubleToString(totalProfit, 2), ")");
          
-         // Dong tat ca lenh
-         CloseAllPositions();
-         DeleteAllPendingOrders();
+         // Dong tat ca lenh VA KIEM TRA LAI
+         CloseAllAndVerify();
          
          // Cong vao tong tich luy
          g_totalProfitAccum += sessionTotal;
@@ -518,6 +542,9 @@ void OnTick()
          g_lastBuyStopOrderPrice = 0;
          g_lastSellStopOrderPrice = 0;
          g_gridInitialized = false;
+         
+         // BAT DAU COOLDOWN
+         StartCooldown();
          
          Sleep(1000);
          g_isFirstRun = true;
@@ -541,8 +568,10 @@ void OnTick()
    if(totalProfit >= TakeProfitMoney && TakeProfitMoney > 0 && totalOrders > 0)
    {
       Print(">>> CHOT LOI dat! Lai: ", DoubleToString(totalProfit, 2), " USD. Dong tat ca lenh...");
-      CloseAllPositions();
-      DeleteAllPendingOrders();
+      
+      // Dong tat ca lenh VA KIEM TRA LAI
+      CloseAllAndVerify();
+      
       g_tpCount++;
       g_totalProfitAccum += totalProfit;
       
@@ -575,6 +604,10 @@ void OnTick()
          g_lastSellStopOrderPrice = 0;
          // Reset grid levels
          g_gridInitialized = false;
+         
+         // BAT DAU COOLDOWN
+         StartCooldown();
+         
          Sleep(1000);
          g_isFirstRun = true;
       }
@@ -2283,6 +2316,134 @@ void DeleteAllPendingOrdersForce()
 }
 
 //+------------------------------------------------------------------+
+//| KIEM TRA KHONG CON LENH NAO (Verify clean state)                 |
+//| Tra ve true neu khong con position va pending order nao          |
+//+------------------------------------------------------------------+
+bool VerifyNoOpenOrdersOrPositions()
+{
+   int posCount = 0;
+   int ordCount = 0;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+            posCount++;
+      }
+   }
+   
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+            ordCount++;
+      }
+   }
+   
+   if(posCount > 0 || ordCount > 0)
+   {
+      Print(">>> VERIFY: Con ", posCount, " position va ", ordCount, " lenh cho!");
+      return false;
+   }
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| DONG TAT CA LENH VA KIEM TRA LAI (CloseAll + Verify)             |
+//| Dong tat ca position, xoa tat ca pending, kiem tra lai           |
+//+------------------------------------------------------------------+
+void CloseAllAndVerify()
+{
+   Print(">>> BAT DAU DONG TAT CA LENH...");
+   
+   CloseAllPositions();
+   DeleteAllPendingOrders();
+   
+   Sleep(500);
+   
+   if(!VerifyNoOpenOrdersOrPositions())
+   {
+      Print(">>> CANH BAO: Con lenh chua dong! Thu dong lai...");
+      CloseAllPositions();
+      DeleteAllPendingOrders();
+      Sleep(500);
+      
+      if(!VerifyNoOpenOrdersOrPositions())
+      {
+         Print(">>> CANH BAO: Van con lenh chua dong sau 2 lan thu!");
+      }
+   }
+   
+   Print(">>> HOAN TAT DONG TAT CA LENH!");
+}
+
+//+------------------------------------------------------------------+
+//| BAT DAU COOLDOWN SAU KHI DAT TP/SESSION                          |
+//+------------------------------------------------------------------+
+void StartCooldown()
+{
+   if(!UseCooldownAfterTP || CooldownMinutes <= 0)
+   {
+      g_isInCooldown = false;
+      return;
+   }
+   
+   g_isInCooldown = true;
+   g_cooldownEndTime = TimeCurrent() + (CooldownMinutes * 60);
+   g_cooldownSecondsRemaining = CooldownMinutes * 60;
+   
+   Print(">>> BAT DAU COOLDOWN: ", CooldownMinutes, " phut");
+   Print(">>> SE VAO LENH LAI LUC: ", TimeToString(g_cooldownEndTime, TIME_DATE|TIME_MINUTES|TIME_SECONDS));
+}
+
+//+------------------------------------------------------------------+
+//| CAP NHAT TRANG THAI COOLDOWN (goi moi tick)                      |
+//| Tra ve true neu dang trong cooldown (KHONG cho vao lenh)         |
+//+------------------------------------------------------------------+
+bool UpdateCooldown()
+{
+   if(!g_isInCooldown)
+      return false;
+   
+   datetime currentTime = TimeCurrent();
+   
+   if(currentTime >= g_cooldownEndTime)
+   {
+      g_isInCooldown = false;
+      g_cooldownSecondsRemaining = 0;
+      Print(">>> COOLDOWN KET THUC! Cho phep vao lenh lai.");
+      return false;
+   }
+   
+   g_cooldownSecondsRemaining = (int)(g_cooldownEndTime - currentTime);
+   
+   if(!VerifyNoOpenOrdersOrPositions())
+   {
+      Print(">>> COOLDOWN: Phat hien lenh con ton tai! Dong tat ca...");
+      CloseAllAndVerify();
+   }
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| FORMAT THOI GIAN COOLDOWN THANH CHUOI (MM:SS)                    |
+//+------------------------------------------------------------------+
+string FormatCooldownTime()
+{
+   if(!g_isInCooldown || g_cooldownSecondsRemaining <= 0)
+      return "";
+   
+   int minutes = g_cooldownSecondsRemaining / 60;
+   int seconds = g_cooldownSecondsRemaining % 60;
+   
+   return StringFormat("%02d:%02d", minutes, seconds);
+}
+
+//+------------------------------------------------------------------+
 //| Tạo panel hiển thị                                               |
 //+------------------------------------------------------------------+
 void CreatePanel()
@@ -2338,6 +2499,11 @@ void CreatePanel()
    // Session Target
    string sessionText = UseSessionTarget ? "Session: 0.00 / " + DoubleToString(SessionTargetMoney, 2) + " USD" : "Session Target: TẮT";
    CreateLabel("GM_Panel_Session", sessionText, x, y, clrMagenta, PanelFontSize);
+   y += lineHeight;
+   
+   // Countdown sau TP/Session
+   string cooldownText = UseCooldownAfterTP ? "Chờ sau TP: " + IntegerToString(CooldownMinutes) + " phút" : "Chờ sau TP: TẮT";
+   CreateLabel("GM_Panel_Cooldown", cooldownText, x, y, clrDarkCyan, PanelFontSize);
    y += lineHeight;
    
    CreateLabel("GM_Panel_Status", "Trạng thái: ĐANG CHẠY", x, y, clrGreen, PanelFontSize);
@@ -2456,6 +2622,24 @@ void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sel
    {
       ObjectSetString(0, "GM_Panel_Session", OBJPROP_TEXT, "Session Target: TẮT");
       ObjectSetInteger(0, "GM_Panel_Session", OBJPROP_COLOR, clrGray);
+   }
+   
+   // Cap nhat Cooldown Countdown
+   if(g_isInCooldown)
+   {
+      string cooldownTime = FormatCooldownTime();
+      ObjectSetString(0, "GM_Panel_Cooldown", OBJPROP_TEXT, "ĐANG CHỜ: " + cooldownTime);
+      ObjectSetInteger(0, "GM_Panel_Cooldown", OBJPROP_COLOR, clrOrangeRed);
+   }
+   else if(UseCooldownAfterTP)
+   {
+      ObjectSetString(0, "GM_Panel_Cooldown", OBJPROP_TEXT, "Chờ sau TP: " + IntegerToString(CooldownMinutes) + " phút");
+      ObjectSetInteger(0, "GM_Panel_Cooldown", OBJPROP_COLOR, clrDarkCyan);
+   }
+   else
+   {
+      ObjectSetString(0, "GM_Panel_Cooldown", OBJPROP_TEXT, "Chờ sau TP: TẮT");
+      ObjectSetInteger(0, "GM_Panel_Cooldown", OBJPROP_COLOR, clrGray);
    }
    
    if(g_isStopped)
