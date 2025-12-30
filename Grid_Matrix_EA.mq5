@@ -101,6 +101,19 @@ input color  PanelColor       = clrBlack;      // Màu chữ panel
 input int    PanelFontSize    = 10;            // Cỡ chữ panel
 
 //+------------------------------------------------------------------+
+//| FORWARD DECLARATIONS                                             |
+//+------------------------------------------------------------------+
+bool PlaceBuyLimit(double price, double lot, int orderNum);
+bool PlaceSellLimit(double price, double lot, int orderNum);
+bool PlaceBuyStop(double price, double lot, int orderNum);
+bool PlaceSellStop(double price, double lot, int orderNum);
+double CalculateBuyLimitLot(int orderNumber);
+double CalculateSellLimitLot(int orderNumber);
+double CalculateBuyStopLot(int orderNumber);
+double CalculateSellStopLot(int orderNumber);
+void PreCalculateAllGridLots();
+
+//+------------------------------------------------------------------+
 //| BIEN TOAN CUC - GLOBAL VARIABLES                                 |
 //+------------------------------------------------------------------+
 CTrade         trade;
@@ -146,6 +159,13 @@ int            g_gridSellStopCount = 0;       // So luong level Sell Stop
 bool           g_gridInitialized = false;     // Da khoi tao grid chua
 double         g_gridReferencePrice = 0;      // Gia tham chieu lam goc cho luoi
 
+// GHI NHO LOT SIZE CHO MOI BAC (tinh san tu input, khong thay doi)
+// Index 0 = bac 1, Index 1 = bac 2, ...
+double         g_gridBuyLimitLots[100];       // Lot tinh san cho tung bac Buy Limit
+double         g_gridSellLimitLots[100];      // Lot tinh san cho tung bac Sell Limit
+double         g_gridBuyStopLots[100];        // Lot tinh san cho tung bac Buy Stop
+double         g_gridSellStopLots[100];       // Lot tinh san cho tung bac Sell Stop
+
 // Thong ke max tu luc bat EA (KHONG reset)
 double         g_maxLotUsed = 0;             // Lot lon nhat ma GIA DA CHAM (kich hoat lenh)
 int            g_maxGridLevel = 0;           // Bac luoi lon nhat ma GIA DA CHAM
@@ -188,6 +208,9 @@ int OnInit()
    Print("Buy Stop: ", UseBuyStop ? "BAT" : "TAT", " | Sell Stop: ", UseSellStop ? "BAT" : "TAT");
    Print("Tu dong reset khi TP: ", AutoResetOnTP ? "BAT" : "TAT");
    Print("Tu dong reset khi SL: ", AutoResetOnSL ? "BAT" : "TAT");
+   
+   // TINH TRUOC TAT CA LOT CHO MOI BAC (tu input)
+   PreCalculateAllGridLots();
    
    return(INIT_SUCCEEDED);
 }
@@ -674,21 +697,21 @@ void PlaceAllGridOrders()
       
       orderPrice = NormalizeDouble(orderPrice, g_digits);
       
-      // Luu level va dat BUY LIMIT neu bat
+      // Luu level va dat BUY LIMIT neu bat (lot da tinh san trong OnInit)
       if(UseBuyLimit)
       {
+         double lot = g_gridBuyLimitLots[i-1];  // Lay lot da tinh san (bac 1 = index 0)
          g_gridBuyLimitLevels[g_gridBuyLimitCount] = orderPrice;
          g_gridBuyLimitCount++;
-         double lot = CalculateBuyLimitLot(i);
          PlaceBuyLimit(orderPrice, lot, i);
       }
       
-      // Luu level va dat SELL STOP trung vi tri
+      // Luu level va dat SELL STOP trung vi tri (lot da tinh san trong OnInit)
       if(UseSellStop)
       {
+         double lot = g_gridSellStopLots[i-1];  // Lay lot da tinh san
          g_gridSellStopLevels[g_gridSellStopCount] = orderPrice;
          g_gridSellStopCount++;
-         double lot = CalculateSellStopLot(i);
          PlaceSellStop(orderPrice, lot, i);
       }
    }
@@ -704,21 +727,21 @@ void PlaceAllGridOrders()
       
       orderPrice = NormalizeDouble(orderPrice, g_digits);
       
-      // Luu level va dat SELL LIMIT neu bat
+      // Luu level va dat SELL LIMIT neu bat (lot da tinh san trong OnInit)
       if(UseSellLimit)
       {
+         double lot = g_gridSellLimitLots[i-1];  // Lay lot da tinh san
          g_gridSellLimitLevels[g_gridSellLimitCount] = orderPrice;
          g_gridSellLimitCount++;
-         double lot = CalculateSellLimitLot(i);
          PlaceSellLimit(orderPrice, lot, i);
       }
       
-      // Luu level va dat BUY STOP trung vi tri
+      // Luu level va dat BUY STOP trung vi tri (lot da tinh san trong OnInit)
       if(UseBuyStop)
       {
+         double lot = g_gridBuyStopLots[i-1];  // Lay lot da tinh san
          g_gridBuyStopLevels[g_gridBuyStopCount] = orderPrice;
          g_gridBuyStopCount++;
-         double lot = CalculateBuyStopLot(i);
          PlaceBuyStop(orderPrice, lot, i);
       }
    }
@@ -1005,12 +1028,79 @@ void CleanDuplicateSellOrdersAtLevel(double level, double tolerance)
 }
 
 //+------------------------------------------------------------------+
+//| Tim lot da tinh san cho 1 level (dung cho auto-refill)           |
+//| Chuyen price thanh bac (1,2,3...) roi tra lot tu mang da tinh san|
+//+------------------------------------------------------------------+
+double LookupLotForLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
+{
+   // Tim bac tu danh sach level da luu
+   // g_gridBuyLimitLevels[0] = level bac 1, [1] = bac 2...
+   double tolerance = GridGapPips * g_pipValue * 0.3;
+   int orderNum = 0; // Bac 1, 2, 3...
+   
+   if(orderType == ORDER_TYPE_BUY_LIMIT)
+   {
+      for(int i = 0; i < g_gridBuyLimitCount; i++)
+      {
+         if(MathAbs(g_gridBuyLimitLevels[i] - priceLevel) < tolerance)
+         {
+            orderNum = i + 1; // Bac = index + 1
+            break;
+         }
+      }
+      if(orderNum > 0 && orderNum <= MaxOrdersPerSide)
+         return g_gridBuyLimitLots[orderNum - 1]; // Tra lot da tinh san
+   }
+   else if(orderType == ORDER_TYPE_SELL_LIMIT)
+   {
+      for(int i = 0; i < g_gridSellLimitCount; i++)
+      {
+         if(MathAbs(g_gridSellLimitLevels[i] - priceLevel) < tolerance)
+         {
+            orderNum = i + 1;
+            break;
+         }
+      }
+      if(orderNum > 0 && orderNum <= MaxOrdersPerSide)
+         return g_gridSellLimitLots[orderNum - 1];
+   }
+   else if(orderType == ORDER_TYPE_BUY_STOP)
+   {
+      for(int i = 0; i < g_gridBuyStopCount; i++)
+      {
+         if(MathAbs(g_gridBuyStopLevels[i] - priceLevel) < tolerance)
+         {
+            orderNum = i + 1;
+            break;
+         }
+      }
+      if(orderNum > 0 && orderNum <= MaxOrdersPerSide)
+         return g_gridBuyStopLots[orderNum - 1];
+   }
+   else if(orderType == ORDER_TYPE_SELL_STOP)
+   {
+      for(int i = 0; i < g_gridSellStopCount; i++)
+      {
+         if(MathAbs(g_gridSellStopLevels[i] - priceLevel) < tolerance)
+         {
+            orderNum = i + 1;
+            break;
+         }
+      }
+      if(orderNum > 0 && orderNum <= MaxOrdersPerSide)
+         return g_gridSellStopLots[orderNum - 1];
+   }
+   
+   return 0; // Khong tim thay
+}
+
+//+------------------------------------------------------------------+
 //| Dam bao co lenh tai level - tao neu chua co (AUTO REFILL)        |
 //| Chi bo sung de HOAN THANH CAP (1 Buy + 1 Sell)                   |
 //| - Neu luoi co Sell (chua co Buy) -> bo sung Buy                  |
 //| - Neu luoi co Buy (chua co Sell) -> bo sung Sell                 |
 //| SU DUNG GRID LEVEL INDEX de xu ly slippage                       |
-//| SU DUNG CountTotalOrdersOfType de tinh lot dung theo nhom        |
+//| SU DUNG LOT DA GHI NHO (neu co) de dam bao dung lot gap thep     |
 //+------------------------------------------------------------------+
 void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
 {
@@ -1030,33 +1120,36 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
    // Da kiem tra ky - Chua co lenh va position, dat lenh moi
    double price = NormalizeDouble(priceLevel, g_digits);
    
-   // TINH ORDER NUMBER = so lenh hien co + 1 (de tinh lot theo nhom dung)
-   int currentCount = CountTotalOrdersOfType(orderType);
-   int orderNum = currentCount + 1;
+   // TIM LOT DA GHI NHO cho level nay
+   double memorizedLot = LookupLotForLevel(orderType, price);
    
    if(orderType == ORDER_TYPE_BUY_LIMIT)
    {
-      double lot = CalculateBuyLimitLot(orderNum);
-      if(PlaceBuyLimit(price, lot, orderNum))
-         Print(">>> AUTO REFILL: Dat lai Buy Limit #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
+      double lot = (memorizedLot > 0) ? memorizedLot : BuyLimitStartLot;
+      if(PlaceBuyLimit(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Buy Limit tai ", DoubleToString(price, g_digits), 
+               " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
    }
    else if(orderType == ORDER_TYPE_SELL_LIMIT)
    {
-      double lot = CalculateSellLimitLot(orderNum);
-      if(PlaceSellLimit(price, lot, orderNum))
-         Print(">>> AUTO REFILL: Dat lai Sell Limit #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
+      double lot = (memorizedLot > 0) ? memorizedLot : SellLimitStartLot;
+      if(PlaceSellLimit(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Sell Limit tai ", DoubleToString(price, g_digits), 
+               " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
    }
    else if(orderType == ORDER_TYPE_BUY_STOP)
    {
-      double lot = CalculateBuyStopLot(orderNum);
-      if(PlaceBuyStop(price, lot, orderNum))
-         Print(">>> AUTO REFILL: Dat lai Buy Stop #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
+      double lot = (memorizedLot > 0) ? memorizedLot : BuyStopStartLot;
+      if(PlaceBuyStop(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Buy Stop tai ", DoubleToString(price, g_digits), 
+               " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
    }
    else if(orderType == ORDER_TYPE_SELL_STOP)
    {
-      double lot = CalculateSellStopLot(orderNum);
-      if(PlaceSellStop(price, lot, orderNum))
-         Print(">>> AUTO REFILL: Dat lai Sell Stop #", orderNum, " tai ", DoubleToString(price, g_digits), " Lot=", DoubleToString(lot, 2));
+      double lot = (memorizedLot > 0) ? memorizedLot : SellStopStartLot;
+      if(PlaceSellStop(price, lot, 0))
+         Print(">>> AUTO REFILL: Dat lai Sell Stop tai ", DoubleToString(price, g_digits), 
+               " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
    }
 }
 
@@ -1723,6 +1816,44 @@ double NormalizeLot(double lot)
    lot = MathFloor(lot / lotStep) * lotStep;
    
    return NormalizeDouble(lot, 2);
+}
+
+//+------------------------------------------------------------------+
+//| TINH TRUOC TAT CA LOT CHO MOI BAC (goi 1 lan trong OnInit)       |
+//| Dua tren input: StartLot, LotMode, Multiplier, Addition, Group   |
+//| Luu vao mang g_grid*Lots[] de dung khi dat lenh va auto-refill   |
+//+------------------------------------------------------------------+
+void PreCalculateAllGridLots()
+{
+   Print(">>> TINH TRUOC LOT CHO ", MaxOrdersPerSide, " BAC...");
+   
+   // Tinh lot cho tung bac (1 den MaxOrdersPerSide)
+   for(int orderNum = 1; orderNum <= MaxOrdersPerSide; orderNum++)
+   {
+      int idx = orderNum - 1; // Index trong mang (bac 1 = index 0)
+      
+      // Buy Limit
+      g_gridBuyLimitLots[idx] = CalculateBuyLimitLot(orderNum);
+      
+      // Sell Limit
+      g_gridSellLimitLots[idx] = CalculateSellLimitLot(orderNum);
+      
+      // Buy Stop
+      g_gridBuyStopLots[idx] = CalculateBuyStopLot(orderNum);
+      
+      // Sell Stop
+      g_gridSellStopLots[idx] = CalculateSellStopLot(orderNum);
+   }
+   
+   // In ra de kiem tra
+   Print(">>> LOT DA TINH SAN (BAC 1-5):");
+   for(int i = 0; i < MathMin(5, MaxOrdersPerSide); i++)
+   {
+      Print("   Bac ", i+1, ": BL=", DoubleToString(g_gridBuyLimitLots[i], 2),
+            " SL=", DoubleToString(g_gridSellLimitLots[i], 2),
+            " BS=", DoubleToString(g_gridBuyStopLots[i], 2),
+            " SS=", DoubleToString(g_gridSellStopLots[i], 2));
+   }
 }
 
 //+------------------------------------------------------------------+
