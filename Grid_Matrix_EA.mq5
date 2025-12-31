@@ -179,6 +179,11 @@ bool           g_isInCooldown = false;        // Dang trong thoi gian cho
 datetime       g_cooldownEndTime = 0;         // Thoi gian ket thuc countdown
 int            g_cooldownSecondsRemaining = 0;// So giay con lai
 
+// KHUNG THONG BAO BO SUNG LENH (3 dong)
+string         g_refillNotify1 = "";          // Thong bao cu nhat (tren cung)
+string         g_refillNotify2 = "";          // Thong bao giua
+string         g_refillNotify3 = "";          // Thong bao moi nhat (duoi cung)
+
 //+------------------------------------------------------------------+
 //| Ham khoi tao EA                                                  |
 //+------------------------------------------------------------------+
@@ -853,7 +858,9 @@ bool CanPlaceMoreOrders(ENUM_ORDER_TYPE orderType)
 
 //+------------------------------------------------------------------+
 //| Dam bao co lenh tai tat ca cac level (Auto Refill)               |
-//| Logic giong EAGridTrading: Moi tick kiem tra va dat lai lenh     |
+//| Logic:                                                           |
+//| - Buy Limit / Sell Limit: Bo sung NGAY LAP TUC khi co level trong|
+//| - Buy Stop / Sell Stop: Bo sung khi gia cach IT NHAT 1 bac luoi  |
 //| Chi bo sung khi tong lenh (cho + mo) < MaxOrdersPerSide          |
 //+------------------------------------------------------------------+
 void EnsureGridOrders()
@@ -865,22 +872,19 @@ void EnsureGridOrders()
    
    double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double minDistance = (GridGapPips * g_pipValue) * 0.5; // Khoang cach toi thieu de dat lenh
+   double gridDistance = GridGapPips * g_pipValue; // 1 bac luoi
    
-   // Buy Limit: kiem tra va bo sung tai cac level DUOI gia hien tai
-   if(AutoRefillBuyLimit && UseBuyLimit && CanPlaceMoreOrders(ORDER_TYPE_BUY_LIMIT))
+   // ============ BUY LIMIT: BO SUNG NGAY LAP TUC ============
+   // Chi can level DUOI gia Ask la dat duoc (khong can khoang cach toi thieu)
+   if(AutoRefillBuyLimit && UseBuyLimit)
    {
       for(int i = 0; i < g_gridBuyLimitCount; i++)
       {
-         // Kiem tra lai truoc moi lenh (vi co the da dat du trong vong lap)
          if(!CanPlaceMoreOrders(ORDER_TYPE_BUY_LIMIT)) break;
          
          double level = g_gridBuyLimitLevels[i];
          
-         // Bo qua neu level qua gan gia hien tai
-         if(MathAbs(level - currentAsk) < minDistance) continue;
-         
-         // Chi dat Buy Limit tai level DUOI gia Ask
+         // Chi dat Buy Limit tai level DUOI gia Ask (dieu kien co ban cua broker)
          if(level < currentAsk)
          {
             EnsureOrderAtLevel(ORDER_TYPE_BUY_LIMIT, level);
@@ -888,20 +892,17 @@ void EnsureGridOrders()
       }
    }
    
-   // Sell Limit: kiem tra va bo sung tai cac level TREN gia hien tai
-   if(AutoRefillSellLimit && UseSellLimit && CanPlaceMoreOrders(ORDER_TYPE_SELL_LIMIT))
+   // ============ SELL LIMIT: BO SUNG NGAY LAP TUC ============
+   // Chi can level TREN gia Bid la dat duoc (khong can khoang cach toi thieu)
+   if(AutoRefillSellLimit && UseSellLimit)
    {
       for(int i = 0; i < g_gridSellLimitCount; i++)
       {
-         // Kiem tra lai truoc moi lenh
          if(!CanPlaceMoreOrders(ORDER_TYPE_SELL_LIMIT)) break;
          
          double level = g_gridSellLimitLevels[i];
          
-         // Bo qua neu level qua gan gia hien tai
-         if(MathAbs(level - currentBid) < minDistance) continue;
-         
-         // Chi dat Sell Limit tai level TREN gia Bid
+         // Chi dat Sell Limit tai level TREN gia Bid (dieu kien co ban cua broker)
          if(level > currentBid)
          {
             EnsureOrderAtLevel(ORDER_TYPE_SELL_LIMIT, level);
@@ -909,21 +910,18 @@ void EnsureGridOrders()
       }
    }
    
-   // Buy Stop: kiem tra va bo sung tai cac level TREN gia hien tai
-   // Dieu kien bo sung: gia hien tai < (level - (GridGapPips * g_pipValue))
-   if(AutoRefillBuyStop && UseBuyStop && CanPlaceMoreOrders(ORDER_TYPE_BUY_STOP))
+   // ============ BUY STOP: CACH IT NHAT 1 BAC LUOI ============
+   // Dieu kien: currentAsk + gridDistance < level (gia phai thap hon level it nhat 1 bac)
+   if(AutoRefillBuyStop && UseBuyStop)
    {
-      double gridDistance = (GridGapPips * g_pipValue);
-      
       for(int i = 0; i < g_gridBuyStopCount; i++)
       {
-         // Kiem tra lai truoc moi lenh
          if(!CanPlaceMoreOrders(ORDER_TYPE_BUY_STOP)) break;
          
          double level = g_gridBuyStopLevels[i];
          
-         // Chi bo sung khi gia < (level - (GridGapPips * g_pipValue))
-         // Tuc la gia phai thap hon level it nhat 1 khoang luoi
+         // Chi bo sung khi gia hien tai THAP HON level it nhat 1 bac luoi
+         // (gia + 1 bac) < level => gia < (level - 1 bac)
          if(currentAsk < (level - gridDistance))
          {
             EnsureOrderAtLevel(ORDER_TYPE_BUY_STOP, level);
@@ -931,21 +929,18 @@ void EnsureGridOrders()
       }
    }
    
-   // Sell Stop: kiem tra va bo sung tai cac level DUOI gia hien tai
-   // Dieu kien bo sung: gia hien tai > (level + (GridGapPips * g_pipValue))
-   if(AutoRefillSellStop && UseSellStop && CanPlaceMoreOrders(ORDER_TYPE_SELL_STOP))
+   // ============ SELL STOP: CACH IT NHAT 1 BAC LUOI ============
+   // Dieu kien: currentBid - gridDistance > level (gia phai cao hon level it nhat 1 bac)
+   if(AutoRefillSellStop && UseSellStop)
    {
-      double gridDistance = (GridGapPips * g_pipValue);
-      
       for(int i = 0; i < g_gridSellStopCount; i++)
       {
-         // Kiem tra lai truoc moi lenh
          if(!CanPlaceMoreOrders(ORDER_TYPE_SELL_STOP)) break;
          
          double level = g_gridSellStopLevels[i];
          
-         // Chi bo sung khi gia > (level + (GridGapPips * g_pipValue))
-         // Tuc la gia phai cao hon level it nhat 1 khoang luoi
+         // Chi bo sung khi gia hien tai CAO HON level it nhat 1 bac luoi
+         // (gia - 1 bac) > level => gia > (level + 1 bac)
          if(currentBid > (level + gridDistance))
          {
             EnsureOrderAtLevel(ORDER_TYPE_SELL_STOP, level);
@@ -1160,29 +1155,41 @@ void EnsureOrderAtLevel(ENUM_ORDER_TYPE orderType, double priceLevel)
    {
       double lot = (memorizedLot > 0) ? memorizedLot : BuyLimitStartLot;
       if(PlaceBuyLimit(price, lot, 0))
+      {
          Print(">>> AUTO REFILL: Dat lai Buy Limit tai ", DoubleToString(price, g_digits), 
                " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
+         AddRefillNotification("Buy Limit", price, lot);
+      }
    }
    else if(orderType == ORDER_TYPE_SELL_LIMIT)
    {
       double lot = (memorizedLot > 0) ? memorizedLot : SellLimitStartLot;
       if(PlaceSellLimit(price, lot, 0))
+      {
          Print(">>> AUTO REFILL: Dat lai Sell Limit tai ", DoubleToString(price, g_digits), 
                " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
+         AddRefillNotification("Sell Limit", price, lot);
+      }
    }
    else if(orderType == ORDER_TYPE_BUY_STOP)
    {
       double lot = (memorizedLot > 0) ? memorizedLot : BuyStopStartLot;
       if(PlaceBuyStop(price, lot, 0))
+      {
          Print(">>> AUTO REFILL: Dat lai Buy Stop tai ", DoubleToString(price, g_digits), 
                " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
+         AddRefillNotification("Buy Stop", price, lot);
+      }
    }
    else if(orderType == ORDER_TYPE_SELL_STOP)
    {
       double lot = (memorizedLot > 0) ? memorizedLot : SellStopStartLot;
       if(PlaceSellStop(price, lot, 0))
+      {
          Print(">>> AUTO REFILL: Dat lai Sell Stop tai ", DoubleToString(price, g_digits), 
                " Lot=", DoubleToString(lot, 2), (memorizedLot > 0 ? " (GHI NHO)" : " (FALLBACK)"));
+         AddRefillNotification("Sell Stop", price, lot);
+      }
    }
 }
 
@@ -2523,6 +2530,72 @@ void CreatePanel()
    CreateButton("GM_Btn_Start", "BẬT EA", x, y, 60, 22, clrWhite, clrGreen);
    CreateButton("GM_Btn_Stop", "TẮT EA", x + 65, y, 60, 22, clrWhite, clrRed);
    CreateButton("GM_Btn_Reset", "RESET", x + 130, y, 60, 22, clrWhite, clrBlue);
+   
+   // KHUNG THONG BAO BO SUNG LENH (ben phai panel)
+   int notifyX = 250;
+   int notifyY = 30;
+   
+   CreateLabel("GM_Notify_Title", "=== THÔNG BÁO BỔ SUNG ===", notifyX, notifyY, clrYellow, PanelFontSize + 1);
+   notifyY += lineHeight + 3;
+   
+   CreateLabel("GM_Notify_Line1", "", notifyX, notifyY, clrSilver, PanelFontSize);
+   notifyY += lineHeight;
+   
+   CreateLabel("GM_Notify_Line2", "", notifyX, notifyY, clrSilver, PanelFontSize);
+   notifyY += lineHeight;
+   
+   CreateLabel("GM_Notify_Line3", "", notifyX, notifyY, clrLime, PanelFontSize);
+}
+
+//+------------------------------------------------------------------+
+//| THEM THONG BAO BO SUNG LENH (day len va them moi vao cuoi)       |
+//| Thong bao cu nhat o tren, moi nhat o duoi                        |
+//+------------------------------------------------------------------+
+void AddRefillNotification(string orderType, double price, double lot)
+{
+   // Day thong bao len tren
+   g_refillNotify1 = g_refillNotify2;
+   g_refillNotify2 = g_refillNotify3;
+   
+   // Tao thong bao moi (moi nhat o cuoi)
+   string timeStr = TimeToString(TimeCurrent(), TIME_MINUTES);
+   g_refillNotify3 = timeStr + " " + orderType + " @ " + DoubleToString(price, g_digits) + " Lot=" + DoubleToString(lot, 2);
+   
+   // Cap nhat hien thi ngay
+   UpdateNotifyPanel();
+}
+
+//+------------------------------------------------------------------+
+//| CAP NHAT KHUNG THONG BAO BO SUNG                                 |
+//+------------------------------------------------------------------+
+void UpdateNotifyPanel()
+{
+   // Dong 1 (cu nhat) - mau xam
+   if(g_refillNotify1 != "")
+   {
+      ObjectSetString(0, "GM_Notify_Line1", OBJPROP_TEXT, g_refillNotify1);
+      ObjectSetInteger(0, "GM_Notify_Line1", OBJPROP_COLOR, clrGray);
+   }
+   else
+      ObjectSetString(0, "GM_Notify_Line1", OBJPROP_TEXT, "");
+   
+   // Dong 2 (giua) - mau xam nhat
+   if(g_refillNotify2 != "")
+   {
+      ObjectSetString(0, "GM_Notify_Line2", OBJPROP_TEXT, g_refillNotify2);
+      ObjectSetInteger(0, "GM_Notify_Line2", OBJPROP_COLOR, clrSilver);
+   }
+   else
+      ObjectSetString(0, "GM_Notify_Line2", OBJPROP_TEXT, "");
+   
+   // Dong 3 (moi nhat) - mau xanh la sang
+   if(g_refillNotify3 != "")
+   {
+      ObjectSetString(0, "GM_Notify_Line3", OBJPROP_TEXT, g_refillNotify3);
+      ObjectSetInteger(0, "GM_Notify_Line3", OBJPROP_COLOR, clrLime);
+   }
+   else
+      ObjectSetString(0, "GM_Notify_Line3", OBJPROP_TEXT, "");
 }
 
 //+------------------------------------------------------------------+
