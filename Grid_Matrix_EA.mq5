@@ -324,45 +324,96 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
+      // ============ NUT BAT EA ============
+      // Chi bat duoc khi EA dang dung (thu cong hoac auto do TP)
+      // Neu dung do TP tong -> Reset het so lieu, chay lai tu dau
+      // Neu dung thu cong -> Chay lai, so lieu van nho
       if(sparam == "GM_Btn_Start")
       {
          ObjectSetInteger(0, "GM_Btn_Start", OBJPROP_STATE, false);
-         if(g_isPaused)
+         
+         if(!g_isPaused && !g_isStopped)
          {
-            g_isPaused = false;
-            g_isFirstRun = true;
-            Print(">>> NUT BAT EA - EA bat dau chay lai!");
+            Print(">>> EA dang chay roi! Khong can bat.");
          }
          else if(g_isStopped)
          {
-            Print(">>> EA da dung do dat TP tong. Nhan RESET de bat dau lai!");
+            // EA dung do dat TP tong -> Reset het so lieu, chay lai tu dau
+            Print(">>> NUT BAT EA - EA dung do TP tong, RESET va chay lai tu dau!");
+            
+            // Reset tat ca so lieu
+            g_tpCount = 0;
+            g_slCount = 0;
+            g_totalProfitAccum = 0;
+            g_sessionClosedProfit = 0;
+            g_sessionTPCount = 0;
+            g_maxLotUsed = 0;
+            g_maxGridLevel = 0;
+            g_gridReferencePrice = 0;
+            g_maxDrawdown = 0;
+            g_isInCooldown = false;
+            g_cooldownEndTime = 0;
+            g_cooldownSecondsRemaining = 0;
+            
+            // Reset thong bao
+            g_refillNotify1 = "";
+            g_refillNotify2 = "";
+            g_refillNotify3 = "";
+            g_notifyTime1 = ""; g_notifyText1 = ""; g_notifyLot1 = "";
+            g_notifyTime2 = ""; g_notifyText2 = ""; g_notifyLot2 = "";
+            g_notifyTime3 = ""; g_notifyText3 = ""; g_notifyLot3 = "";
+            
+            g_isStopped = false;
+            g_isPaused = false;
+            g_isFirstRun = true;
+            
+            Print(">>> EA da reset va bat dau chay lai!");
          }
-         else
+         else if(g_isPaused)
          {
-            Print(">>> EA dang chay roi!");
+            // EA dung thu cong -> Chay lai, so lieu van nho
+            g_isPaused = false;
+            g_isFirstRun = true;
+            Print(">>> NUT BAT EA - EA chay lai (so lieu van nho)!");
          }
       }
+      // ============ NUT TAT EA ============
+      // Chi tat duoc khi EA dang chay
+      // Xoa lenh cho + dong lenh mo -> dung EA
       else if(sparam == "GM_Btn_Stop")
       {
          ObjectSetInteger(0, "GM_Btn_Stop", OBJPROP_STATE, false);
-         if(!g_isPaused && !g_isStopped)
+         
+         if(g_isPaused || g_isStopped)
          {
-            g_isPaused = true;
-            DeleteAllPendingOrders();
-            Print(">>> NUT TAT EA - Da xoa lenh cho, EA tam dung!");
+            Print(">>> EA da dung roi! Khong can tat.");
          }
          else
          {
-            Print(">>> EA da dung roi!");
+            Print(">>> NUT TAT EA - Dang dong tat ca lenh...");
+            
+            // Dong tat ca vi the dang mo
+            CloseAllPositionsForce();
+            Sleep(300);
+            
+            // Xoa tat ca lenh cho
+            DeleteAllPendingOrders();
+            
+            g_isPaused = true;
+            g_isInCooldown = false;
+            
+            Print(">>> EA da dung! Da dong het lenh mo va xoa lenh cho.");
          }
       }
+      // ============ NUT LAM MOI ============
+      // Reset het moi thu, bo dem va bat dau chay, mo cac lenh cho
       else if(sparam == "GM_Btn_Reset")
       {
          ObjectSetInteger(0, "GM_Btn_Reset", OBJPROP_STATE, false);
-         Print(">>> NUT RESET EA - Bat dau reset toan bo!");
-         Print(">>> Luu y: Se dong TAT CA vi the va lenh cho tren ", _Symbol, " (khong loc Magic)");
+         Print(">>> NUT LAM MOI - Bat dau reset toan bo va chay lai!");
+         Print(">>> Luu y: Se dong TAT CA vi the va lenh cho tren ", _Symbol);
          
-         // Buoc 1: Dong TAT CA vi the tren symbol (KHONG loc Magic)
+         // Buoc 1: Dong TAT CA vi the tren symbol
          int maxAttempts = 10;
          for(int attempt = 0; attempt < maxAttempts; attempt++)
          {
@@ -374,7 +425,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
             Sleep(500);
          }
          
-         // Buoc 2: Xoa TAT CA lenh cho tren symbol (KHONG loc Magic)
+         // Buoc 2: Xoa TAT CA lenh cho tren symbol
          for(int attempt = 0; attempt < maxAttempts; attempt++)
          {
             int orderCount = CountAllPendingOrdersOnSymbol();
@@ -385,53 +436,68 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
             Sleep(500);
          }
          
-         // Buoc 3: Reset tat ca bien (KHONG reset g_maxDrawdown)
+         // Buoc 3: Reset TAT CA so lieu va bo dem
          g_tpCount = 0;
          g_slCount = 0;
          g_totalProfitAccum = 0;
-         g_sessionClosedProfit = 0;  // Reset session profit
+         g_sessionClosedProfit = 0;
          g_sessionTPCount = 0;
-         g_isStopped = false;
-         g_isPaused = true;
-         g_isFirstRun = true;
+         g_maxLotUsed = 0;
+         g_maxGridLevel = 0;
+         g_maxDrawdown = 0;
+         g_gridReferencePrice = 0;
+         
+         // Reset cooldown
+         g_isInCooldown = false;
+         g_cooldownEndTime = 0;
+         g_cooldownSecondsRemaining = 0;
+         
          // Reset bien dem lenh TP
          g_buyLimitTPCount = 0;
          g_sellLimitTPCount = 0;
          g_buyStopTPCount = 0;
          g_sellStopTPCount = 0;
+         
          // Reset bien bo sung lenh Stop
          g_pendingBuyStopRefill = false;
          g_pendingSellStopRefill = false;
          g_lastBuyStopOrderPrice = 0;
          g_lastSellStopOrderPrice = 0;
+         
+         // Reset thong bao
+         g_refillNotify1 = "";
+         g_refillNotify2 = "";
+         g_refillNotify3 = "";
+         g_notifyTime1 = ""; g_notifyText1 = ""; g_notifyLot1 = "";
+         g_notifyTime2 = ""; g_notifyText2 = ""; g_notifyLot2 = "";
+         g_notifyTime3 = ""; g_notifyText3 = ""; g_notifyLot3 = "";
+         
          // Reset grid levels
          g_gridInitialized = false;
+         
+         // QUAN TRONG: Khong dung, chay luon!
+         g_isStopped = false;
+         g_isPaused = false;  // CHAY LUON, khong dung
+         g_isFirstRun = true;
          
          // Buoc 4: Cap nhat panel
          if(ShowPanel)
          {
             UpdatePanel(0, 0, 0, 0, 0);
+            UpdateNotifyPanel();
          }
          
-         // Buoc 5: Buoc redraw chart
+         // Buoc 5: Redraw chart
          ChartRedraw(0);
          
          int remainPos = CountAllPositionsOnSymbol();
          int remainOrders = CountAllPendingOrdersOnSymbol();
-         Print(">>> RESET HOAN TAT!");
-         Print(">>> Vi the con tren ", _Symbol, ": ", remainPos);
-         Print(">>> Lenh cho con tren ", _Symbol, ": ", remainOrders);
-         Print(">>> g_tpCount=", g_tpCount, " g_slCount=", g_slCount);
-         Print(">>> g_maxDrawdown=", g_maxDrawdown, " g_totalProfitAccum=", g_totalProfitAccum);
-         Print(">>> g_isPaused=", g_isPaused, " g_isStopped=", g_isStopped);
+         Print(">>> LAM MOI HOAN TAT! EA bat dau chay va mo lenh cho!");
+         Print(">>> Vi the con: ", remainPos, " | Lenh cho con: ", remainOrders);
          
          if(remainPos > 0 || remainOrders > 0)
          {
             Print(">>> CANH BAO: Van con lenh chua xoa duoc! Thu lai hoac xoa thu cong.");
-         }
-         else
-         {
-            Print(">>> Nhan BAT EA de chay lai!");
          }
       }
    }
@@ -2451,101 +2517,128 @@ string FormatCooldownTime()
 }
 
 //+------------------------------------------------------------------+
-//| Tạo panel hiển thị                                               |
+//| Tạo panel hiển thị - GIAO DIEN TIENG VIET                        |
 //+------------------------------------------------------------------+
 void CreatePanel()
 {
-   int x = 10;
-   int y = 30;
-   int lineHeight = 18;
+   int panelX = 10;
+   int panelY = 25;
+   int panelWidth = 230;
+   int spacing = 5;
+   int lineHeight = 16;
+   int boxHeight = 18;
    
-   CreateLabel("GM_Panel_Title", "=== GRID MATRIX EA v1.0 ===", x, y, PanelColor, PanelFontSize + 2);
-   y += lineHeight + 5;
+   // ============ HEADER: Symbol + Status ============
+   CreateRectangle("GM_BG_Header", panelX, panelY, panelWidth, 28, C'30,35,45', C'60,65,75');
+   CreateLabel("GM_Header_Symbol", _Symbol, panelX + 8, panelY + 6, clrWhite, 11);
+   CreateLabel("GM_Header_TF", EnumToString((ENUM_TIMEFRAMES)Period()), panelX + 100, panelY + 8, clrGray, 9);
+   CreateLabel("GM_Header_Status", "Dang chay", panelX + 155, panelY + 8, clrLime, 9);
+   panelY += 33;
    
-   CreateLabel("GM_Panel_Symbol", "Cặp tiền: " + _Symbol, x, y, PanelColor, PanelFontSize);
-   y += lineHeight;
+   // ============ KHUNG LOI NHUAN LON ============
+   CreateRectangle("GM_BG_Profit", panelX, panelY, panelWidth, 55, C'40,45,55', C'60,65,75');
+   CreateLabel("GM_Label_Profit", "Loi nhuan hien tai", panelX + 8, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Label_BasePrice", "Gia goc luoi", panelX + 145, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Value_Profit", "0.00", panelX + 8, panelY + 22, clrLime, 14);
+   CreateLabel("GM_Value_ProfitUSD", "USD", panelX + 80, panelY + 28, clrGray, 10);
+   CreateLabel("GM_Value_BasePrice", "0.00000", panelX + 145, panelY + 22, clrGold, 10);
+   panelY += 60;
    
-   CreateLabel("GM_Panel_RefPrice", "Giá gốc lưới: Chờ khởi tạo...", x, y, clrGold, PanelFontSize);
-   y += lineHeight;
+   // ============ LO LON NHAT va MUC CHOT LOI (2 khung nho) ============
+   int halfWidth = (panelWidth - spacing) / 2;
    
-   CreateLabel("GM_Panel_Profit", "Lợi nhuận: 0.00 USD", x, y, PanelColor, PanelFontSize);
-   y += lineHeight;
+   // Lo lon nhat
+   CreateRectangle("GM_BG_MaxLoss", panelX, panelY, halfWidth, 42, C'50,40,40', C'80,60,60');
+   CreateLabel("GM_Label_MaxLoss", "Lo lon nhat", panelX + 8, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Value_MaxLoss", "0.00 USD", panelX + 8, panelY + 20, clrOrangeRed, 10);
    
-   // Chi tiet tung loai lenh
-   CreateLabel("GM_Panel_BuyLimit", "Buy Limit: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrBlue, PanelFontSize);
-   y += lineHeight;
+   // Muc chot loi dung EA
+   CreateRectangle("GM_BG_Target", panelX + halfWidth + spacing, panelY, halfWidth, 42, C'40,50,40', C'60,80,60');
+   CreateLabel("GM_Label_Target", "Chot loi dung EA", panelX + halfWidth + spacing + 8, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Value_Target", DoubleToString(TotalTakeProfitMoney, 0) + " USD", panelX + halfWidth + spacing + 8, panelY + 20, clrLime, 10);
+   panelY += 47;
    
-   CreateLabel("GM_Panel_SellLimit", "Sell Limit: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrRed, PanelFontSize);
-   y += lineHeight;
+   // ============ KHUNG MUA va BAN (2 cot) ============
+   // MUA
+   CreateRectangle("GM_BG_Buy", panelX, panelY, halfWidth, 60, C'35,45,60', C'55,70,95');
+   CreateLabel("GM_Buy_Title", "MUA", panelX + 8, panelY + 5, clrDodgerBlue, 10);
+   CreateLabel("GM_Buy_Active", "0 mo", panelX + 50, panelY + 7, clrGold, 8);
+   CreateLabel("GM_Buy_LimitLabel", "Limit", panelX + 8, panelY + 24, clrSilver, 9);
+   CreateLabel("GM_Buy_LimitValue", "0/" + IntegerToString(MaxOrdersPerSide), panelX + 60, panelY + 24, clrWhite, 9);
+   CreateLabel("GM_Buy_StopLabel", "Stop", panelX + 8, panelY + 40, clrSilver, 9);
+   CreateLabel("GM_Buy_StopValue", "0/" + IntegerToString(MaxOrdersPerSide), panelX + 60, panelY + 40, clrWhite, 9);
    
-   CreateLabel("GM_Panel_BuyStop", "Buy Stop: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrDodgerBlue, PanelFontSize);
-   y += lineHeight;
+   // BAN
+   CreateRectangle("GM_BG_Sell", panelX + halfWidth + spacing, panelY, halfWidth, 60, C'60,40,45', C'95,55,65');
+   CreateLabel("GM_Sell_Title", "BAN", panelX + halfWidth + spacing + 8, panelY + 5, clrOrangeRed, 10);
+   CreateLabel("GM_Sell_Active", "0 mo", panelX + halfWidth + spacing + 55, panelY + 7, clrGold, 8);
+   CreateLabel("GM_Sell_LimitLabel", "Limit", panelX + halfWidth + spacing + 8, panelY + 24, clrSilver, 9);
+   CreateLabel("GM_Sell_LimitValue", "0/" + IntegerToString(MaxOrdersPerSide), panelX + halfWidth + spacing + 60, panelY + 24, clrWhite, 9);
+   CreateLabel("GM_Sell_StopLabel", "Stop", panelX + halfWidth + spacing + 8, panelY + 40, clrSilver, 9);
+   CreateLabel("GM_Sell_StopValue", "0/" + IntegerToString(MaxOrdersPerSide), panelX + halfWidth + spacing + 60, panelY + 40, clrWhite, 9);
+   panelY += 65;
    
-   CreateLabel("GM_Panel_SellStop", "Sell Stop: 0/" + IntegerToString(MaxOrdersPerSide), x, y, clrOrangeRed, PanelFontSize);
-   y += lineHeight;
+   // ============ KHUNG THONG BAO ============
+   CreateRectangle("GM_BG_Notify", panelX, panelY, panelWidth, 72, C'45,50,60', C'65,70,80');
+   CreateLabel("GM_Notify_Icon", ">>", panelX + 8, panelY + 5, clrGold, 9);
+   CreateLabel("GM_Notify_Title", "THONG BAO BO SUNG LENH", panelX + 30, panelY + 5, clrWhite, 9);
+   CreateLabel("GM_Notify_Time1", "", panelX + 8, panelY + 22, clrGray, 8);
+   CreateLabel("GM_Notify_Text1", "", panelX + 45, panelY + 22, clrSilver, 8);
+   CreateLabel("GM_Notify_Lot1", "", panelX + 175, panelY + 22, clrGray, 8);
+   CreateLabel("GM_Notify_Time2", "", panelX + 8, panelY + 38, clrGray, 8);
+   CreateLabel("GM_Notify_Text2", "", panelX + 45, panelY + 38, clrSilver, 8);
+   CreateLabel("GM_Notify_Lot2", "", panelX + 175, panelY + 38, clrGray, 8);
+   CreateLabel("GM_Notify_Time3", "", panelX + 8, panelY + 54, clrDarkGray, 8);
+   CreateLabel("GM_Notify_Text3", "", panelX + 45, panelY + 54, clrLime, 8);
+   CreateLabel("GM_Notify_Lot3", "", panelX + 175, panelY + 54, clrLime, 8);
+   panelY += 77;
    
-   // Vi the dang mo
-   CreateLabel("GM_Panel_OpenBuy", "Đang mở BUY: 0", x, y, clrBlue, PanelFontSize);
-   y += lineHeight;
+   // ============ KHUNG THONG SO ============
+   CreateRectangle("GM_BG_Stats", panelX, panelY, panelWidth, 75, C'40,45,55', C'60,65,75');
    
-   CreateLabel("GM_Panel_OpenSell", "Đang mở SELL: 0", x, y, clrRed, PanelFontSize);
-   y += lineHeight;
+   // Hang 1: Reset lai + Reset lo
+   CreateLabel("GM_Label_ResetProfit", "Chot lai Reset", panelX + 8, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Value_ResetProfit", "+" + DoubleToString(TakeProfitMoney, 2) + " USD", panelX + 8, panelY + 18, clrLime, 9);
+   CreateLabel("GM_Label_ResetLoss", "Cat lo Reset", panelX + halfWidth + spacing + 8, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Value_ResetLoss", "-" + DoubleToString(StopLossMoney, 2) + " USD", panelX + halfWidth + spacing + 8, panelY + 18, clrOrangeRed, 9);
    
-   CreateLabel("GM_Panel_TP", "Reset tại lãi: +" + DoubleToString(TakeProfitMoney, 2) + " USD", x, y, clrGreen, PanelFontSize);
-   y += lineHeight;
+   // Hang 2: Session + Tong da dong
+   CreateLabel("GM_Label_Session", "Lai phien", panelX + 8, panelY + 35, clrGray, 8);
+   string sessionInitText = "(0.00/" + DoubleToString(SessionTargetMoney, 0) + ") USD";
+   CreateLabel("GM_Value_Session", sessionInitText, panelX + 8, panelY + 48, clrGold, 9);
+   CreateLabel("GM_Label_TotalClosed", "Tong da dong", panelX + halfWidth + spacing + 8, panelY + 35, clrGray, 8);
+   CreateLabel("GM_Value_TotalClosed", "0.00 USD", panelX + halfWidth + spacing + 8, panelY + 48, clrDodgerBlue, 9);
+   panelY += 80;
    
-   CreateLabel("GM_Panel_SL", "Reset tại lỗ: -" + DoubleToString(StopLossMoney, 2) + " USD", x, y, clrRed, PanelFontSize);
-   y += lineHeight;
+   // ============ KHUNG COUNTDOWN + MAX LOT + TRANG THAI ============
+   CreateRectangle("GM_BG_MaxLot", panelX, panelY, panelWidth, 55, C'35,40,50', C'55,60,70');
    
-   CreateLabel("GM_Panel_MaxDD", "Lỗ lớn nhất: 0.00 USD", x, y, clrOrangeRed, PanelFontSize);
-   y += lineHeight;
+   // Dong 1: Cho vao lenh (countdown)
+   CreateLabel("GM_Label_Countdown", "Cho vao lenh:", panelX + 8, panelY + 5, clrGray, 8);
+   CreateLabel("GM_Value_Countdown", "---", panelX + 85, panelY + 5, clrLime, 9);
    
-   CreateLabel("GM_Panel_TotalProfit", "Tổng đã đóng: 0.00 / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD", x, y, clrDarkGreen, PanelFontSize);
-   y += lineHeight;
+   // Dong 2: Max Lot + Max Bac + Trang thai
+   CreateLabel("GM_Label_MaxLotStat", "Lot lon nhat", panelX + 8, panelY + 22, clrGray, 8);
+   CreateLabel("GM_Value_MaxLot", "0.00", panelX + 8, panelY + 35, clrGold, 10);
+   CreateLabel("GM_Label_MaxStep", "Bac cao nhat", panelX + 75, panelY + 22, clrGray, 8);
+   CreateLabel("GM_Value_MaxStep", "0", panelX + 75, panelY + 35, clrGold, 10);
+   CreateLabel("GM_Label_StatusText", "Trang thai", panelX + 145, panelY + 22, clrGray, 8);
+   CreateLabel("GM_Status_Dot", "*", panelX + 145, panelY + 35, clrLime, 12);
+   CreateLabel("GM_Status_Text", "CHAY", panelX + 160, panelY + 37, clrLime, 9);
+   panelY += 60;
    
-   // Session Target
-   string sessionText = UseSessionTarget ? "Session: 0.00 / " + DoubleToString(SessionTargetMoney, 2) + " USD" : "Session Target: TẮT";
-   CreateLabel("GM_Panel_Session", sessionText, x, y, clrMagenta, PanelFontSize);
-   y += lineHeight;
-   
-   // Countdown sau TP/Session
-   string cooldownText = UseCooldownAfterTP ? "Chờ sau TP: " + IntegerToString(CooldownMinutes) + " phút" : "Chờ sau TP: TẮT";
-   CreateLabel("GM_Panel_Cooldown", cooldownText, x, y, clrDarkCyan, PanelFontSize);
-   y += lineHeight;
-   
-   CreateLabel("GM_Panel_Status", "Trạng thái: ĐANG CHẠY", x, y, clrGreen, PanelFontSize);
-   y += lineHeight;
-   
-   string resetText = "Reset: TP=" + (AutoResetOnTP ? "BẬT" : "TẮT") + " | SL=" + (AutoResetOnSL ? "BẬT" : "TẮT");
-   CreateLabel("GM_Panel_Reset", resetText, x, y, clrGray, PanelFontSize);
-   y += lineHeight;
-   
-   CreateLabel("GM_Panel_Count", "TP: 0 lần | SL: 0 lần", x, y, clrGray, PanelFontSize);
-   y += lineHeight;
-   
-   // Max Lot va Max Grid Level (KHONG reset)
-   CreateLabel("GM_Panel_MaxLot", "Max Lot: 0.00 | Max Bậc: 0", x, y, clrDarkOrange, PanelFontSize);
-   y += lineHeight + 5;
-   
-   CreateButton("GM_Btn_Start", "BẬT EA", x, y, 60, 22, clrWhite, clrGreen);
-   CreateButton("GM_Btn_Stop", "TẮT EA", x + 65, y, 60, 22, clrWhite, clrRed);
-   CreateButton("GM_Btn_Reset", "RESET", x + 130, y, 60, 22, clrWhite, clrBlue);
-   
-   // KHUNG THONG BAO BO SUNG LENH (ben phai panel)
-   int notifyX = 250;
-   int notifyY = 30;
-   
-   CreateLabel("GM_Notify_Title", "=== THÔNG BÁO BỔ SUNG ===", notifyX, notifyY, clrYellow, PanelFontSize + 1);
-   notifyY += lineHeight + 3;
-   
-   CreateLabel("GM_Notify_Line1", "", notifyX, notifyY, clrSilver, PanelFontSize);
-   notifyY += lineHeight;
-   
-   CreateLabel("GM_Notify_Line2", "", notifyX, notifyY, clrSilver, PanelFontSize);
-   notifyY += lineHeight;
-   
-   CreateLabel("GM_Notify_Line3", "", notifyX, notifyY, clrLime, PanelFontSize);
+   // ============ BUTTONS ============
+   CreateButton("GM_Btn_Start", "Bat EA", panelX, panelY, 70, 28, clrWhite, C'0,150,80');
+   CreateButton("GM_Btn_Stop", "Tat EA", panelX + 75, panelY, 70, 28, clrWhite, C'180,60,60');
+   CreateButton("GM_Btn_Reset", "Lam moi", panelX + 150, panelY, 60, 28, clrWhite, C'70,130,180');
 }
+
+//+------------------------------------------------------------------+
+//| Cau truc luu thong bao (Time, Text, Lot)                         |
+//+------------------------------------------------------------------+
+string g_notifyTime1 = "", g_notifyText1 = "", g_notifyLot1 = "";
+string g_notifyTime2 = "", g_notifyText2 = "", g_notifyLot2 = "";
+string g_notifyTime3 = "", g_notifyText3 = "", g_notifyLot3 = "";
 
 //+------------------------------------------------------------------+
 //| THEM THONG BAO BO SUNG LENH (day len va them moi vao cuoi)       |
@@ -2554,48 +2647,78 @@ void CreatePanel()
 void AddRefillNotification(string orderType, double price, double lot)
 {
    // Day thong bao len tren
-   g_refillNotify1 = g_refillNotify2;
-   g_refillNotify2 = g_refillNotify3;
+   g_notifyTime1 = g_notifyTime2;
+   g_notifyText1 = g_notifyText2;
+   g_notifyLot1 = g_notifyLot2;
+   
+   g_notifyTime2 = g_notifyTime3;
+   g_notifyText2 = g_notifyText3;
+   g_notifyLot2 = g_notifyLot3;
    
    // Tao thong bao moi (moi nhat o cuoi)
-   string timeStr = TimeToString(TimeCurrent(), TIME_MINUTES);
-   g_refillNotify3 = timeStr + " " + orderType + " @ " + DoubleToString(price, g_digits) + " Lot=" + DoubleToString(lot, 2);
+   g_notifyTime3 = TimeToString(TimeCurrent(), TIME_MINUTES);
+   g_notifyText3 = orderType + " @ " + DoubleToString(price, g_digits);
+   g_notifyLot3 = "Lot " + DoubleToString(lot, 2);
+   
+   // Giu lai cho tuong thich
+   g_refillNotify1 = g_refillNotify2;
+   g_refillNotify2 = g_refillNotify3;
+   g_refillNotify3 = g_notifyTime3 + " " + g_notifyText3 + " " + g_notifyLot3;
    
    // Cap nhat hien thi ngay
    UpdateNotifyPanel();
 }
 
 //+------------------------------------------------------------------+
-//| CAP NHAT KHUNG THONG BAO BO SUNG                                 |
+//| CAP NHAT KHUNG THONG BAO BO SUNG - GIAO DIEN MOI                 |
 //+------------------------------------------------------------------+
 void UpdateNotifyPanel()
 {
    // Dong 1 (cu nhat) - mau xam
-   if(g_refillNotify1 != "")
-   {
-      ObjectSetString(0, "GM_Notify_Line1", OBJPROP_TEXT, g_refillNotify1);
-      ObjectSetInteger(0, "GM_Notify_Line1", OBJPROP_COLOR, clrGray);
-   }
-   else
-      ObjectSetString(0, "GM_Notify_Line1", OBJPROP_TEXT, "");
+   ObjectSetString(0, "GM_Notify_Time1", OBJPROP_TEXT, g_notifyTime1);
+   ObjectSetString(0, "GM_Notify_Text1", OBJPROP_TEXT, g_notifyText1);
+   ObjectSetString(0, "GM_Notify_Lot1", OBJPROP_TEXT, g_notifyLot1);
+   ObjectSetInteger(0, "GM_Notify_Time1", OBJPROP_COLOR, clrGray);
+   ObjectSetInteger(0, "GM_Notify_Text1", OBJPROP_COLOR, clrGray);
+   ObjectSetInteger(0, "GM_Notify_Lot1", OBJPROP_COLOR, clrGray);
    
    // Dong 2 (giua) - mau xam nhat
-   if(g_refillNotify2 != "")
-   {
-      ObjectSetString(0, "GM_Notify_Line2", OBJPROP_TEXT, g_refillNotify2);
-      ObjectSetInteger(0, "GM_Notify_Line2", OBJPROP_COLOR, clrSilver);
-   }
-   else
-      ObjectSetString(0, "GM_Notify_Line2", OBJPROP_TEXT, "");
+   ObjectSetString(0, "GM_Notify_Time2", OBJPROP_TEXT, g_notifyTime2);
+   ObjectSetString(0, "GM_Notify_Text2", OBJPROP_TEXT, g_notifyText2);
+   ObjectSetString(0, "GM_Notify_Lot2", OBJPROP_TEXT, g_notifyLot2);
+   ObjectSetInteger(0, "GM_Notify_Time2", OBJPROP_COLOR, clrDarkGray);
+   ObjectSetInteger(0, "GM_Notify_Text2", OBJPROP_COLOR, clrSilver);
+   ObjectSetInteger(0, "GM_Notify_Lot2", OBJPROP_COLOR, clrDarkGray);
    
-   // Dong 3 (moi nhat) - mau xanh la sang
-   if(g_refillNotify3 != "")
-   {
-      ObjectSetString(0, "GM_Notify_Line3", OBJPROP_TEXT, g_refillNotify3);
-      ObjectSetInteger(0, "GM_Notify_Line3", OBJPROP_COLOR, clrLime);
-   }
-   else
-      ObjectSetString(0, "GM_Notify_Line3", OBJPROP_TEXT, "");
+   // Dong 3 (moi nhat) - mau xanh la/vang
+   ObjectSetString(0, "GM_Notify_Time3", OBJPROP_TEXT, g_notifyTime3);
+   ObjectSetString(0, "GM_Notify_Text3", OBJPROP_TEXT, g_notifyText3);
+   ObjectSetString(0, "GM_Notify_Lot3", OBJPROP_TEXT, g_notifyLot3);
+   ObjectSetInteger(0, "GM_Notify_Time3", OBJPROP_COLOR, clrDarkGray);
+   ObjectSetInteger(0, "GM_Notify_Text3", OBJPROP_COLOR, clrLime);
+   ObjectSetInteger(0, "GM_Notify_Lot3", OBJPROP_COLOR, clrGold);
+}
+
+//+------------------------------------------------------------------+
+//| Tao Rectangle Label (nen co mau)                                 |
+//+------------------------------------------------------------------+
+void CreateRectangle(string name, int x, int y, int width, int height, color bgColor, color borderColor)
+{
+   if(ObjectFind(0, name) >= 0)
+      ObjectDelete(0, name);
+   
+   ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bgColor);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, borderColor);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
 }
 
 //+------------------------------------------------------------------+
@@ -2603,14 +2726,18 @@ void UpdateNotifyPanel()
 //+------------------------------------------------------------------+
 void CreateLabel(string name, string text, int x, int y, color clr, int fontSize)
 {
+   if(ObjectFind(0, name) >= 0)
+      ObjectDelete(0, name);
+   
    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
 }
 
 //+------------------------------------------------------------------+
@@ -2647,105 +2774,115 @@ void CreateButton(string name, string text, int x, int y, int width, int height,
 }
 
 //+------------------------------------------------------------------+
-//| Cập nhật panel                                                   |
+//| Cập nhật panel - GIAO DIEN TIENG VIET                            |
 //+------------------------------------------------------------------+
 void UpdatePanel(double profit, int buyPos, int sellPos, int buyPending, int sellPending)
 {
-   color profitColor = profit >= 0 ? clrGreen : clrRed;
-   
-   ObjectSetString(0, "GM_Panel_Profit", OBJPROP_TEXT, "Lợi nhuận: " + DoubleToString(profit, 2) + " USD");
-   ObjectSetInteger(0, "GM_Panel_Profit", OBJPROP_COLOR, profitColor);
-   
-   // Dem lenh cho theo tung loai - CHI DEM LENH CHO
-   int buyLimitPending, sellLimitPending, buyStopPending, sellStopPending;
-   CountPendingByType(buyLimitPending, sellLimitPending, buyStopPending, sellStopPending);
-   
-   // Hien thi tung loai lenh (so lenh cho / max)
-   string blText = UseBuyLimit ? "Buy Limit: " + IntegerToString(buyLimitPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Buy Limit: TẮT";
-   string slText = UseSellLimit ? "Sell Limit: " + IntegerToString(sellLimitPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Sell Limit: TẮT";
-   string bsText = UseBuyStop ? "Buy Stop: " + IntegerToString(buyStopPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Buy Stop: TẮT";
-   string ssText = UseSellStop ? "Sell Stop: " + IntegerToString(sellStopPending) + "/" + IntegerToString(MaxOrdersPerSide) : "Sell Stop: TẮT";
-   
-   ObjectSetString(0, "GM_Panel_BuyLimit", OBJPROP_TEXT, blText);
-   ObjectSetString(0, "GM_Panel_SellLimit", OBJPROP_TEXT, slText);
-   ObjectSetString(0, "GM_Panel_BuyStop", OBJPROP_TEXT, bsText);
-   ObjectSetString(0, "GM_Panel_SellStop", OBJPROP_TEXT, ssText);
-   
-   // Vi the dang mo
-   ObjectSetString(0, "GM_Panel_OpenBuy", OBJPROP_TEXT, "Đang mở BUY: " + IntegerToString(buyPos));
-   ObjectSetString(0, "GM_Panel_OpenSell", OBJPROP_TEXT, "Đang mở SELL: " + IntegerToString(sellPos));
-   
-   ObjectSetString(0, "GM_Panel_MaxDD", OBJPROP_TEXT, "Lỗ lớn nhất: " + DoubleToString(g_maxDrawdown, 2) + " USD");
-   
-   // Hien thi: Tong lai da dong / So tien dung EA
-   ObjectSetString(0, "GM_Panel_TotalProfit", OBJPROP_TEXT, "Tổng đã đóng: " + DoubleToString(g_totalProfitAccum, 2) + " / " + DoubleToString(TotalTakeProfitMoney, 0) + " USD");
-   color totalColor = g_totalProfitAccum >= 0 ? clrDarkGreen : clrRed;
-   ObjectSetInteger(0, "GM_Panel_TotalProfit", OBJPROP_COLOR, totalColor);
-   
-   // Hien thi Session Target: (Profit da dong trong session + Floating hien tai)
-   if(UseSessionTarget)
-   {
-      double sessionTotal = g_sessionClosedProfit + profit;
-      string sessionText = "Session: " + DoubleToString(sessionTotal, 2) + " / " + DoubleToString(SessionTargetMoney, 2) + " USD";
-      ObjectSetString(0, "GM_Panel_Session", OBJPROP_TEXT, sessionText);
-      color sessionColor = sessionTotal >= SessionTargetMoney ? clrGreen : clrMagenta;
-      ObjectSetInteger(0, "GM_Panel_Session", OBJPROP_COLOR, sessionColor);
-   }
-   else
-   {
-      ObjectSetString(0, "GM_Panel_Session", OBJPROP_TEXT, "Session Target: TẮT");
-      ObjectSetInteger(0, "GM_Panel_Session", OBJPROP_COLOR, clrGray);
-   }
-   
-   // Cap nhat Cooldown Countdown
-   if(g_isInCooldown)
-   {
-      string cooldownTime = FormatCooldownTime();
-      ObjectSetString(0, "GM_Panel_Cooldown", OBJPROP_TEXT, "ĐANG CHỜ: " + cooldownTime);
-      ObjectSetInteger(0, "GM_Panel_Cooldown", OBJPROP_COLOR, clrOrangeRed);
-   }
-   else if(UseCooldownAfterTP)
-   {
-      ObjectSetString(0, "GM_Panel_Cooldown", OBJPROP_TEXT, "Chờ sau TP: " + IntegerToString(CooldownMinutes) + " phút");
-      ObjectSetInteger(0, "GM_Panel_Cooldown", OBJPROP_COLOR, clrDarkCyan);
-   }
-   else
-   {
-      ObjectSetString(0, "GM_Panel_Cooldown", OBJPROP_TEXT, "Chờ sau TP: TẮT");
-      ObjectSetInteger(0, "GM_Panel_Cooldown", OBJPROP_COLOR, clrGray);
-   }
-   
+   // ============ HEADER STATUS ============
    if(g_isStopped)
    {
-      ObjectSetString(0, "GM_Panel_Status", OBJPROP_TEXT, "Trạng thái: ĐÃ DỪNG (TP TỔNG)");
-      ObjectSetInteger(0, "GM_Panel_Status", OBJPROP_COLOR, clrRed);
+      ObjectSetString(0, "GM_Header_Status", OBJPROP_TEXT, "Da dung");
+      ObjectSetInteger(0, "GM_Header_Status", OBJPROP_COLOR, clrRed);
    }
    else if(g_isPaused)
    {
-      ObjectSetString(0, "GM_Panel_Status", OBJPROP_TEXT, "Trạng thái: TẠM DỪNG");
-      ObjectSetInteger(0, "GM_Panel_Status", OBJPROP_COLOR, clrOrange);
+      ObjectSetString(0, "GM_Header_Status", OBJPROP_TEXT, "Tam dung");
+      ObjectSetInteger(0, "GM_Header_Status", OBJPROP_COLOR, clrOrange);
+   }
+   else if(g_isInCooldown)
+   {
+      ObjectSetString(0, "GM_Header_Status", OBJPROP_TEXT, "Cho " + FormatCooldownTime());
+      ObjectSetInteger(0, "GM_Header_Status", OBJPROP_COLOR, clrOrangeRed);
    }
    else
    {
-      ObjectSetString(0, "GM_Panel_Status", OBJPROP_TEXT, "Trạng thái: ĐANG CHẠY");
-      ObjectSetInteger(0, "GM_Panel_Status", OBJPROP_COLOR, clrGreen);
+      ObjectSetString(0, "GM_Header_Status", OBJPROP_TEXT, "Dang chay");
+      ObjectSetInteger(0, "GM_Header_Status", OBJPROP_COLOR, clrLime);
    }
    
-   ObjectSetString(0, "GM_Panel_Count", OBJPROP_TEXT, "TP: " + IntegerToString(g_tpCount) + " lần | SL: " + IntegerToString(g_slCount) + " lần");
+   // ============ PROFIT ============
+   color profitColor = profit >= 0 ? clrLime : clrOrangeRed;
+   ObjectSetString(0, "GM_Value_Profit", OBJPROP_TEXT, DoubleToString(profit, 2));
+   ObjectSetInteger(0, "GM_Value_Profit", OBJPROP_COLOR, profitColor);
    
-   // Hien thi Max Lot va Max Grid Level (KHONG reset - chi reset khi tat/bat lai EA)
-   ObjectSetString(0, "GM_Panel_MaxLot", OBJPROP_TEXT, "Max Lot: " + DoubleToString(g_maxLotUsed, 2) + " | Max Bậc: " + IntegerToString(g_maxGridLevel));
-   
-   // Hien thi gia tham chieu
+   // ============ BASE PRICE ============
    if(g_gridReferencePrice > 0)
+      ObjectSetString(0, "GM_Value_BasePrice", OBJPROP_TEXT, DoubleToString(g_gridReferencePrice, g_digits));
+   else
+      ObjectSetString(0, "GM_Value_BasePrice", OBJPROP_TEXT, "---");
+   
+   // ============ MAX LOSS ============
+   ObjectSetString(0, "GM_Value_MaxLoss", OBJPROP_TEXT, DoubleToString(g_maxDrawdown, 2) + " USD");
+   
+   // ============ DEM LENH THEO LOAI ============
+   int buyLimitPending, sellLimitPending, buyStopPending, sellStopPending;
+   CountPendingByType(buyLimitPending, sellLimitPending, buyStopPending, sellStopPending);
+   
+   // MUA: Limit + Stop + Dang mo
+   ObjectSetString(0, "GM_Buy_Active", OBJPROP_TEXT, IntegerToString(buyPos) + " mo");
+   ObjectSetString(0, "GM_Buy_LimitValue", OBJPROP_TEXT, IntegerToString(buyLimitPending) + "/" + IntegerToString(MaxOrdersPerSide));
+   ObjectSetString(0, "GM_Buy_StopValue", OBJPROP_TEXT, IntegerToString(buyStopPending) + "/" + IntegerToString(MaxOrdersPerSide));
+   
+   // BAN: Limit + Stop + Dang mo
+   ObjectSetString(0, "GM_Sell_Active", OBJPROP_TEXT, IntegerToString(sellPos) + " mo");
+   ObjectSetString(0, "GM_Sell_LimitValue", OBJPROP_TEXT, IntegerToString(sellLimitPending) + "/" + IntegerToString(MaxOrdersPerSide));
+   ObjectSetString(0, "GM_Sell_StopValue", OBJPROP_TEXT, IntegerToString(sellStopPending) + "/" + IntegerToString(MaxOrdersPerSide));
+   
+   // ============ LAI PHIEN (Session Profit) - Hien thi (x/y) USD ============
+   double sessionTotal = g_sessionClosedProfit + profit;
+   string sessionText = "(" + DoubleToString(sessionTotal, 2) + "/" + DoubleToString(SessionTargetMoney, 0) + ") USD";
+   ObjectSetString(0, "GM_Value_Session", OBJPROP_TEXT, sessionText);
+   color sessionColor = sessionTotal >= SessionTargetMoney ? clrLime : (sessionTotal >= 0 ? clrGold : clrOrangeRed);
+   ObjectSetInteger(0, "GM_Value_Session", OBJPROP_COLOR, sessionColor);
+   
+   // ============ TONG DA DONG ============
+   ObjectSetString(0, "GM_Value_TotalClosed", OBJPROP_TEXT, DoubleToString(g_totalProfitAccum, 2) + " USD");
+   color totalColor = g_totalProfitAccum >= 0 ? clrDodgerBlue : clrOrangeRed;
+   ObjectSetInteger(0, "GM_Value_TotalClosed", OBJPROP_COLOR, totalColor);
+   
+   // ============ COUNTDOWN - CHO VAO LENH ============
+   if(g_isInCooldown)
    {
-      ObjectSetString(0, "GM_Panel_RefPrice", OBJPROP_TEXT, "Giá gốc lưới: " + DoubleToString(g_gridReferencePrice, g_digits));
-      ObjectSetInteger(0, "GM_Panel_RefPrice", OBJPROP_COLOR, clrGold);
+      // Dang cho: hien thi phut:giay con lai
+      ObjectSetString(0, "GM_Value_Countdown", OBJPROP_TEXT, FormatCooldownTime() + " con lai");
+      ObjectSetInteger(0, "GM_Value_Countdown", OBJPROP_COLOR, clrOrangeRed);
    }
    else
    {
-      ObjectSetString(0, "GM_Panel_RefPrice", OBJPROP_TEXT, "Giá gốc lưới: Chờ khởi tạo...");
-      ObjectSetInteger(0, "GM_Panel_RefPrice", OBJPROP_COLOR, clrGray);
+      // San sang: hien thi thoi gian cho sau TP
+      string readyText = "San sang (" + IntegerToString(CooldownMinutes) + " phut)";
+      ObjectSetString(0, "GM_Value_Countdown", OBJPROP_TEXT, readyText);
+      ObjectSetInteger(0, "GM_Value_Countdown", OBJPROP_COLOR, clrLime);
+   }
+   
+   // ============ MAX LOT + MAX BAC ============
+   ObjectSetString(0, "GM_Value_MaxLot", OBJPROP_TEXT, DoubleToString(g_maxLotUsed, 2));
+   ObjectSetString(0, "GM_Value_MaxStep", OBJPROP_TEXT, IntegerToString(g_maxGridLevel));
+   
+   // ============ TRANG THAI ============
+   if(g_isStopped)
+   {
+      ObjectSetString(0, "GM_Status_Text", OBJPROP_TEXT, "DUNG");
+      ObjectSetInteger(0, "GM_Status_Text", OBJPROP_COLOR, clrRed);
+      ObjectSetInteger(0, "GM_Status_Dot", OBJPROP_COLOR, clrRed);
+   }
+   else if(g_isPaused)
+   {
+      ObjectSetString(0, "GM_Status_Text", OBJPROP_TEXT, "TAM");
+      ObjectSetInteger(0, "GM_Status_Text", OBJPROP_COLOR, clrOrange);
+      ObjectSetInteger(0, "GM_Status_Dot", OBJPROP_COLOR, clrOrange);
+   }
+   else if(g_isInCooldown)
+   {
+      ObjectSetString(0, "GM_Status_Text", OBJPROP_TEXT, "CHO");
+      ObjectSetInteger(0, "GM_Status_Text", OBJPROP_COLOR, clrOrangeRed);
+      ObjectSetInteger(0, "GM_Status_Dot", OBJPROP_COLOR, clrOrangeRed);
+   }
+   else
+   {
+      ObjectSetString(0, "GM_Status_Text", OBJPROP_TEXT, "CHAY");
+      ObjectSetInteger(0, "GM_Status_Text", OBJPROP_COLOR, clrLime);
+      ObjectSetInteger(0, "GM_Status_Dot", OBJPROP_COLOR, clrLime);
    }
 }
 
