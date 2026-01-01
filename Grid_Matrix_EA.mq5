@@ -45,7 +45,7 @@ input double BuyLimitAddition      = 0.01;     // Bước cộng lot (khi chọn
 input int    BuyLimitGridsPerGroup = 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseBuyLimitTP         = false;    // Bật TP riêng cho Buy Limit
 input int    BuyLimitTPPips        = 50;       // TP Buy Limit (pips)
-input bool   AutoRefillBuyLimit    = false;    // Tự động bổ sung Buy Limit khi đạt TP
+input bool   AutoRefillBuyLimit    = true;     // Tự động bổ sung Buy Limit khi đạt TP
 
 input group "=== SELL LIMIT ==="
 input bool   UseSellLimit          = true;     // Bật lệnh Sell Limit
@@ -56,7 +56,7 @@ input double SellLimitAddition     = 0.01;     // Bước cộng lot (khi chọn
 input int    SellLimitGridsPerGroup= 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseSellLimitTP        = false;    // Bật TP riêng cho Sell Limit
 input int    SellLimitTPPips       = 50;       // TP Sell Limit (pips)
-input bool   AutoRefillSellLimit   = false;    // Tự động bổ sung Sell Limit khi đạt TP
+input bool   AutoRefillSellLimit   = true;     // Tự động bổ sung Sell Limit khi đạt TP
 
 input group "=== BUY STOP ==="
 input bool   UseBuyStop            = false;    // Bật lệnh Buy Stop
@@ -67,7 +67,7 @@ input double BuyStopAddition       = 0.01;     // Bước cộng lot (khi chọn
 input int    BuyStopGridsPerGroup  = 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseBuyStopTP          = false;    // Bật TP riêng cho Buy Stop
 input int    BuyStopTPPips         = 50;       // TP Buy Stop (pips)
-input bool   AutoRefillBuyStop     = false;    // Tự động bổ sung Buy Stop khi đạt TP
+input bool   AutoRefillBuyStop     = true;     // Tự động bổ sung Buy Stop khi đạt TP
 
 input group "=== SELL STOP ==="
 input bool   UseSellStop           = false;    // Bật lệnh Sell Stop
@@ -78,7 +78,7 @@ input double SellStopAddition      = 0.01;     // Bước cộng lot (khi chọn
 input int    SellStopGridsPerGroup = 5;        // Số lưới mỗi nhóm (khi chọn theo nhóm)
 input bool   UseSellStopTP         = false;    // Bật TP riêng cho Sell Stop
 input int    SellStopTPPips        = 50;       // TP Sell Stop (pips)
-input bool   AutoRefillSellStop    = false;    // Tự động bổ sung Sell Stop khi đạt TP
+input bool   AutoRefillSellStop    = true;     // Tự động bổ sung Sell Stop khi đạt TP
 
 input group "=== CHỐT LỜI / CẮT LỖ THEO TIỀN ==="
 input double TakeProfitMoney  = 100.0;         // Chốt lời khi lãi đạt (USD)
