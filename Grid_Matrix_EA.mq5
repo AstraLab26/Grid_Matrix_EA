@@ -184,6 +184,20 @@ string         g_refillNotify1 = "";          // Thong bao cu nhat (tren cung)
 string         g_refillNotify2 = "";          // Thong bao giua
 string         g_refillNotify3 = "";          // Thong bao moi nhat (duoi cung)
 
+// GHI NHO CAC LUOI DA DUOC KICH HOAT (gia cham) de tu dong bo sung
+// Moi level co the ghi nho: gia, loai lenh (Buy/Sell), trang thai (can bo sung hay khong)
+struct GridMemoryItem {
+   double   price;           // Gia cua level
+   int      levelIndex;      // Chi so level (-3, -2, -1, 1, 2, 3...)
+   bool     hasBuy;          // Co lenh Buy da kich hoat tai day
+   bool     hasSell;         // Co lenh Sell da kich hoat tai day
+   bool     needRefillBuy;   // Can bo sung lenh Buy
+   bool     needRefillSell;  // Can bo sung lenh Sell
+   datetime activatedTime;   // Thoi gian kich hoat
+};
+GridMemoryItem g_gridMemory[200];             // Mang ghi nho cac level
+int            g_gridMemoryCount = 0;         // So luong level da ghi nho
+
 //+------------------------------------------------------------------+
 //| Ham khoi tao EA                                                  |
 //+------------------------------------------------------------------+
@@ -286,11 +300,27 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       
       Print(">>> GIA CHAM BAC ", gridLevel, " | Lot: ", DoubleToString(dealVolume, 2), 
             " | Max Lot: ", DoubleToString(g_maxLotUsed, 2), " | Max Bac: ", g_maxGridLevel);
+      
+      // GHI NHO LUOI DA KICH HOAT + VE TAM GIAC
+      long dealType = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+      bool isBuyDeal = (dealType == DEAL_TYPE_BUY);
+      
+      // Ghi nho level nay da duoc kich hoat
+      RememberActivatedGrid(dealPrice, isBuyDeal, TimeCurrent());
+      
+      // Ve tam giac tren chart
+      DrawGridTriangle(dealPrice, isBuyDeal, TimeCurrent());
    }
    
    // XU LY KHI DONG VI THE (ENTRY_OUT) - Dem TP va Session profit
    if(dealEntry == DEAL_ENTRY_OUT)
    {
+      // Lay thong tin de danh dau can bo sung
+      long dealType = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+      // Khi dong vi the Buy thi dealType = DEAL_TYPE_SELL (ban de dong)
+      // Khi dong vi the Sell thi dealType = DEAL_TYPE_BUY (mua de dong)
+      bool wasBuyPosition = (dealType == DEAL_TYPE_SELL);  // Dao nguoc
+      
       // Dem so lan TP theo loai lenh (cho thong ke) va cong vao session profit
       if(dealReason == DEAL_REASON_TP && dealProfit > 0)
       {
@@ -307,6 +337,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
          g_sessionClosedProfit += dealProfit;
          Print(">>> Lenh dat TP! Comment: ", dealComment, " Profit: ", DoubleToString(dealProfit, 2));
          Print(">>> Session da dong: ", DoubleToString(g_sessionClosedProfit, 2), " USD");
+         
+         // DANH DAU LEVEL CAN BO SUNG sau khi TP
+         MarkLevelNeedRefill(dealPrice, wasBuyPosition);
       }
    }
 }
@@ -362,6 +395,10 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
             g_notifyTime1 = ""; g_notifyText1 = ""; g_notifyLot1 = "";
             g_notifyTime2 = ""; g_notifyText2 = ""; g_notifyLot2 = "";
             g_notifyTime3 = ""; g_notifyText3 = ""; g_notifyLot3 = "";
+            
+            // Reset grid memory va xoa tam giac
+            ResetGridMemory();
+            DeleteAllGridTriangles();
             
             g_isStopped = false;
             g_isPaused = false;
@@ -474,6 +511,10 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          
          // Reset grid levels
          g_gridInitialized = false;
+         
+         // Reset grid memory va xoa tam giac tren chart
+         ResetGridMemory();
+         DeleteAllGridTriangles();
          
          // QUAN TRONG: Khong dung, chay luon!
          g_isStopped = false;
@@ -614,6 +655,10 @@ void OnTick()
          g_lastSellStopOrderPrice = 0;
          g_gridInitialized = false;
          
+         // Reset grid memory va xoa tam giac (SESSION TARGET)
+         ResetGridMemory();
+         DeleteAllGridTriangles();
+         
          // BAT DAU COOLDOWN
          StartCooldown();
          
@@ -676,6 +721,10 @@ void OnTick()
          // Reset grid levels
          g_gridInitialized = false;
          
+         // Reset grid memory va xoa tam giac (AUTO RESET TP)
+         ResetGridMemory();
+         DeleteAllGridTriangles();
+         
          // BAT DAU COOLDOWN
          StartCooldown();
          
@@ -714,6 +763,11 @@ void OnTick()
          g_lastSellStopOrderPrice = 0;
          // Reset grid levels
          g_gridInitialized = false;
+         
+         // Reset grid memory va xoa tam giac (AUTO RESET SL)
+         ResetGridMemory();
+         DeleteAllGridTriangles();
+         
          Sleep(1000);
          g_isFirstRun = true;
       }
@@ -731,6 +785,9 @@ void OnTick()
    // TU DONG BO SUNG LENH TAI CAC LEVEL DA LUU (Auto Refill)
    // Moi tick kiem tra tat ca level va dat lai neu chua co lenh
    EnsureGridOrders();
+   
+   // BO SUNG LENH TU GRID MEMORY (cac level da ghi nho khi kich hoat)
+   RefillFromGridMemory();
 }
 
 //+------------------------------------------------------------------+
@@ -2771,6 +2828,286 @@ void CreateButton(string name, string text, int x, int y, int width, int height,
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, name, OBJPROP_ZORDER, 100);
+}
+
+//+------------------------------------------------------------------+
+//| VE TAM GIAC TREN CHART KHI LUOI DUOC KICH HOAT                   |
+//| Tam giac hien thi B (Buy) hoac S (Sell) tai muc gia              |
+//+------------------------------------------------------------------+
+void DrawGridTriangle(double price, bool isBuy, datetime time)
+{
+   string prefix = "GM_Triangle_";
+   string typeStr = isBuy ? "B" : "S";
+   string objName = prefix + typeStr + "_" + DoubleToString(price, g_digits);
+   
+   // Xoa tam giac cu neu co
+   if(ObjectFind(0, objName) >= 0)
+      ObjectDelete(0, objName);
+   
+   // Tao arrow (tam giac) tren chart
+   ENUM_OBJECT arrowType = isBuy ? OBJ_ARROW_UP : OBJ_ARROW_DOWN;
+   color arrowColor = isBuy ? clrDodgerBlue : clrOrangeRed;
+   
+   if(!ObjectCreate(0, objName, arrowType, 0, time, price))
+   {
+      Print(">>> Loi tao tam giac: ", GetLastError());
+      return;
+   }
+   
+   ObjectSetInteger(0, objName, OBJPROP_COLOR, arrowColor);
+   ObjectSetInteger(0, objName, OBJPROP_WIDTH, 2);
+   ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+   ObjectSetInteger(0, objName, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, objName, OBJPROP_ANCHOR, isBuy ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   
+   // Tao label B/S ben canh tam giac
+   string labelName = prefix + "Label_" + typeStr + "_" + DoubleToString(price, g_digits);
+   if(ObjectFind(0, labelName) >= 0)
+      ObjectDelete(0, labelName);
+   
+   ObjectCreate(0, labelName, OBJ_TEXT, 0, time, price);
+   ObjectSetString(0, labelName, OBJPROP_TEXT, typeStr);
+   ObjectSetString(0, labelName, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, labelName, OBJPROP_COLOR, arrowColor);
+   ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, isBuy ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER);
+   ObjectSetInteger(0, labelName, OBJPROP_SELECTABLE, false);
+   
+   Print(">>> VE TAM GIAC: ", typeStr, " tai ", DoubleToString(price, g_digits));
+}
+
+//+------------------------------------------------------------------+
+//| GHI NHO LUOI DA KICH HOAT - Luu level de bo sung lenh            |
+//+------------------------------------------------------------------+
+void RememberActivatedGrid(double price, bool isBuy, datetime time)
+{
+   int levelIndex = GetGridLevelIndex(price);
+   
+   // Kiem tra xem level nay da co trong memory chua
+   for(int i = 0; i < g_gridMemoryCount; i++)
+   {
+      if(g_gridMemory[i].levelIndex == levelIndex)
+      {
+         // Cap nhat thong tin
+         if(isBuy)
+         {
+            g_gridMemory[i].hasBuy = true;
+            g_gridMemory[i].needRefillBuy = true;  // Danh dau can bo sung Buy khi TP
+         }
+         else
+         {
+            g_gridMemory[i].hasSell = true;
+            g_gridMemory[i].needRefillSell = true; // Danh dau can bo sung Sell khi TP
+         }
+         g_gridMemory[i].activatedTime = time;
+         
+         Print(">>> GHI NHO CAP NHAT: Level ", levelIndex, " | ", (isBuy ? "Buy" : "Sell"), 
+               " tai ", DoubleToString(price, g_digits));
+         return;
+      }
+   }
+   
+   // Them level moi vao memory
+   if(g_gridMemoryCount < 200)
+   {
+      g_gridMemory[g_gridMemoryCount].price = price;
+      g_gridMemory[g_gridMemoryCount].levelIndex = levelIndex;
+      g_gridMemory[g_gridMemoryCount].hasBuy = isBuy;
+      g_gridMemory[g_gridMemoryCount].hasSell = !isBuy;
+      g_gridMemory[g_gridMemoryCount].needRefillBuy = isBuy;
+      g_gridMemory[g_gridMemoryCount].needRefillSell = !isBuy;
+      g_gridMemory[g_gridMemoryCount].activatedTime = time;
+      g_gridMemoryCount++;
+      
+      Print(">>> GHI NHO MOI: Level ", levelIndex, " | ", (isBuy ? "Buy" : "Sell"), 
+            " tai ", DoubleToString(price, g_digits), " | Tong: ", g_gridMemoryCount);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| XOA TAT CA TAM GIAC TREN CHART                                   |
+//+------------------------------------------------------------------+
+void DeleteAllGridTriangles()
+{
+   int total = ObjectsTotal(0, 0, -1);
+   for(int i = total - 1; i >= 0; i--)
+   {
+      string name = ObjectName(0, i, 0, -1);
+      if(StringFind(name, "GM_Triangle_") >= 0)
+         ObjectDelete(0, name);
+   }
+   Print(">>> Da xoa tat ca tam giac tren chart");
+}
+
+//+------------------------------------------------------------------+
+//| RESET GRID MEMORY                                                |
+//+------------------------------------------------------------------+
+void ResetGridMemory()
+{
+   g_gridMemoryCount = 0;
+   for(int i = 0; i < 200; i++)
+   {
+      g_gridMemory[i].price = 0;
+      g_gridMemory[i].levelIndex = 0;
+      g_gridMemory[i].hasBuy = false;
+      g_gridMemory[i].hasSell = false;
+      g_gridMemory[i].needRefillBuy = false;
+      g_gridMemory[i].needRefillSell = false;
+      g_gridMemory[i].activatedTime = 0;
+   }
+   Print(">>> Da reset Grid Memory");
+}
+
+//+------------------------------------------------------------------+
+//| KIEM TRA VA BO SUNG LENH TAI CAC LEVEL DA GHI NHO                |
+//| Dua tren grid memory de dam bao moi luoi khong thieu lenh        |
+//+------------------------------------------------------------------+
+void RefillFromGridMemory()
+{
+   if(g_gridMemoryCount == 0) return;
+   if(!g_gridInitialized) return;
+   
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double gridDistance = GridGapPips * g_pipValue;
+   
+   for(int i = 0; i < g_gridMemoryCount; i++)
+   {
+      double levelPrice = g_gridMemory[i].price;
+      int levelIndex = g_gridMemory[i].levelIndex;
+      
+      // BO SUNG BUY neu can
+      if(g_gridMemory[i].needRefillBuy)
+      {
+         // Kiem tra xem level nay da co lenh/vi the Buy chua
+         if(!HasOrderOrPositionAtLevel(levelPrice, true))
+         {
+            // Xac dinh loai lenh Buy phu hop
+            if(levelIndex < 0)  // DUOI duong vang -> Buy Limit
+            {
+               if(AutoRefillBuyLimit && UseBuyLimit && levelPrice < currentAsk)
+               {
+                  EnsureOrderAtLevel(ORDER_TYPE_BUY_LIMIT, levelPrice);
+                  g_gridMemory[i].needRefillBuy = false;
+               }
+            }
+            else if(levelIndex > 0)  // TREN duong vang -> Buy Stop
+            {
+               if(AutoRefillBuyStop && UseBuyStop && currentAsk < (levelPrice - gridDistance))
+               {
+                  EnsureOrderAtLevel(ORDER_TYPE_BUY_STOP, levelPrice);
+                  g_gridMemory[i].needRefillBuy = false;
+               }
+            }
+         }
+         else
+         {
+            g_gridMemory[i].needRefillBuy = false; // Da co lenh, khong can bo sung nua
+         }
+      }
+      
+      // BO SUNG SELL neu can
+      if(g_gridMemory[i].needRefillSell)
+      {
+         // Kiem tra xem level nay da co lenh/vi the Sell chua
+         if(!HasOrderOrPositionAtLevel(levelPrice, false))
+         {
+            // Xac dinh loai lenh Sell phu hop
+            if(levelIndex > 0)  // TREN duong vang -> Sell Limit
+            {
+               if(AutoRefillSellLimit && UseSellLimit && levelPrice > currentBid)
+               {
+                  EnsureOrderAtLevel(ORDER_TYPE_SELL_LIMIT, levelPrice);
+                  g_gridMemory[i].needRefillSell = false;
+               }
+            }
+            else if(levelIndex < 0)  // DUOI duong vang -> Sell Stop
+            {
+               if(AutoRefillSellStop && UseSellStop && currentBid > (levelPrice + gridDistance))
+               {
+                  EnsureOrderAtLevel(ORDER_TYPE_SELL_STOP, levelPrice);
+                  g_gridMemory[i].needRefillSell = false;
+               }
+            }
+         }
+         else
+         {
+            g_gridMemory[i].needRefillSell = false; // Da co lenh, khong can bo sung nua
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| KIEM TRA CO LENH HOAC VI THE TAI LEVEL KHONG                     |
+//| isBuyType = true: kiem tra Buy, false: kiem tra Sell             |
+//+------------------------------------------------------------------+
+bool HasOrderOrPositionAtLevel(double priceLevel, bool isBuyType)
+{
+   int targetLevel = GetGridLevelIndex(priceLevel);
+   
+   // Kiem tra pending orders
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(orderInfo.SelectByIndex(i))
+      {
+         if(orderInfo.Symbol() == _Symbol && orderInfo.Magic() == MagicNumber)
+         {
+            int orderLevel = GetGridLevelIndex(orderInfo.PriceOpen());
+            if(orderLevel == targetLevel)
+            {
+               ENUM_ORDER_TYPE ot = orderInfo.OrderType();
+               if(isBuyType && (ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP))
+                  return true;
+               if(!isBuyType && (ot == ORDER_TYPE_SELL_LIMIT || ot == ORDER_TYPE_SELL_STOP))
+                  return true;
+            }
+         }
+      }
+   }
+   
+   // Kiem tra positions
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == MagicNumber)
+         {
+            int posLevel = GetGridLevelIndex(positionInfo.PriceOpen());
+            if(posLevel == targetLevel)
+            {
+               if(isBuyType && positionInfo.PositionType() == POSITION_TYPE_BUY)
+                  return true;
+               if(!isBuyType && positionInfo.PositionType() == POSITION_TYPE_SELL)
+                  return true;
+            }
+         }
+      }
+   }
+   
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| DANH DAU LEVEL CAN BO SUNG SAU KHI VI THE DONG                   |
+//+------------------------------------------------------------------+
+void MarkLevelNeedRefill(double price, bool isBuy)
+{
+   int levelIndex = GetGridLevelIndex(price);
+   
+   for(int i = 0; i < g_gridMemoryCount; i++)
+   {
+      if(g_gridMemory[i].levelIndex == levelIndex)
+      {
+         if(isBuy)
+            g_gridMemory[i].needRefillBuy = true;
+         else
+            g_gridMemory[i].needRefillSell = true;
+         
+         Print(">>> DANH DAU CAN BO SUNG: Level ", levelIndex, " | ", (isBuy ? "Buy" : "Sell"));
+         return;
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
