@@ -104,6 +104,9 @@ input bool   ShowPanel        = true;          // Hiển thị panel thông tin
 input color  PanelColor       = clrBlack;      // Màu chữ panel
 input int    PanelFontSize    = 10;            // Cỡ chữ panel
 
+input group "=== THÔNG BÁO PUSH (MT5) ==="
+input bool   EnablePushNotification = true;    // Bật thông báo push về điện thoại
+
 //+------------------------------------------------------------------+
 //| FORWARD DECLARATIONS                                             |
 //+------------------------------------------------------------------+
@@ -643,6 +646,11 @@ void OnTick()
          Print(">>> Session TP lan thu: ", g_sessionTPCount);
          Print(">>> Tong lai tich luy: ", DoubleToString(g_totalProfitAccum, 2), " USD");
          
+         // GUI THONG BAO PUSH VE DIEN THOAI
+         string notifyMsg = StringFormat("Grid Matrix EA - SESSION TARGET!\nSymbol: %s\nSession: %.2f / %.2f USD\nTong tich luy: %.2f USD\nEA da tu dong reset",
+                                         _Symbol, sessionTotal, SessionTargetMoney, g_totalProfitAccum);
+         SendPushNotification(notifyMsg);
+         
          // Reset session - bat dau vong moi
          g_sessionClosedProfit = 0;
          g_buyLimitTPCount = 0;
@@ -706,6 +714,12 @@ void OnTick()
       {
          Print(">>> TU DONG RESET EA - Bat dau vong moi...");
          Print(">>> Max Drawdown hien tai: ", DoubleToString(g_maxDrawdown, 2), " USD");
+         
+         // GUI THONG BAO PUSH VE DIEN THOAI
+         string notifyMsg = StringFormat("Grid Matrix EA - CHOT LOI!\nSymbol: %s\nLai: %.2f USD\nTong tich luy: %.2f USD\nEA da tu dong reset",
+                                         _Symbol, totalProfit, g_totalProfitAccum);
+         SendPushNotification(notifyMsg);
+         
          // Reset session profit (ĐK 1 đạt → reset session)
          g_sessionClosedProfit = 0;
          // Reset bien dem lenh TP
@@ -2557,6 +2571,24 @@ bool UpdateCooldown()
    }
    
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Gui thong bao push ve dien thoai qua MT5                          |
+//+------------------------------------------------------------------+
+void SendPushNotification(string message)
+{
+   if(!EnablePushNotification)
+      return;
+   
+   if(SendNotification(message))
+   {
+      Print(">>> DA GUI THONG BAO PUSH: ", message);
+   }
+   else
+   {
+      Print(">>> LOI GUI THONG BAO PUSH: ", GetLastError());
+   }
 }
 
 //+------------------------------------------------------------------+
